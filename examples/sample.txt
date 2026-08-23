@@ -1,0 +1,1 @@
+Furthermore, it is important to note that distributed training in 2024 changed how teams ship models. See https://example.com/train and the note in "Scaling Laws". Contact ada@example.com for the 12.5% figure.
