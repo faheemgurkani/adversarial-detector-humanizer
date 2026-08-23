@@ -1,0 +1,17 @@
+adversarial-detector-humanizer
+Copyright 2026 Faheem Gurkani
+
+This product includes software and model-loading patterns derived from
+rasbt/ai-detector-from-scratch, licensed under the Apache License 2.0:
+
+    https://github.com/rasbt/ai-detector-from-scratch
+
+Published detector weights used by the optional local extra are hosted on
+the Hugging Face Hub under the rasbt/ namespace, for example:
+
+    rasbt/ai-text-detector-logreg
+    rasbt/ai-text-detector-distilbert
+    rasbt/ai-text-detector-qwen3-0.6b-variable
+
+Those artifacts retain their upstream licenses. This project does not
+redistribute model weights.
