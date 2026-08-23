@@ -56,6 +56,8 @@ class FakeDetector:
                 value = self.sentence_scores[key]
             elif str(index) in self.sentence_scores:
                 value = self.sentence_scores[str(index)]
+            elif self.document_score is not None:
+                value = self.document_score
             else:
                 value = self.default_score
             results.append(ScoreResult(score=value, label=score_to_label(value)))

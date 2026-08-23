@@ -140,6 +140,7 @@ def lock_records(lock: PreserveLock, restored_text: str) -> list[tuple[str, str,
     """Return (id, original, still_present) tuples for reporting."""
     records = []
     for span in lock.spans:
-        identifier = span.sentinel.split("_")[-1].rstrip("_")
+        parts = [part for part in span.sentinel.split("_") if part]
+        identifier = parts[-1] if parts else span.sentinel
         records.append((identifier, span.text, span.text in restored_text))
     return records

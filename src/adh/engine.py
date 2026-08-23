@@ -72,20 +72,26 @@ def _flag_indices(
 
 def _pick_candidate(
     original: str,
-    candidates: list[str],
     *,
+    rewriter: Rewriter,
     detector: Detector,
     gate: SemanticGate,
     threshold: float,
+    best_of_n: int,
 ) -> tuple[str, float, float, list[LockRecord], bool]:
     locked, lock = extract_locks(original)
     lock_meta = [
         LockRecord(id=identifier, text=text, ok=True)
         for identifier, text, _ok in lock_records(lock, original)
     ]
+    before = detector.score(original).score
     best_text = original
-    best_score = detector.score(original).score
+    best_score = before
     kept = False
+    try:
+        candidates = rewriter.rewrite(locked, n=best_of_n)
+    except Exception:
+        candidates = []
     for raw in candidates:
         try:
             restored = restore_locks(raw, lock, strict=True)
@@ -103,7 +109,7 @@ def _pick_candidate(
                 LockRecord(id=identifier, text=text, ok=present)
                 for identifier, text, present in lock_records(lock, restored)
             ]
-    return best_text, detector.score(original).score, best_score, lock_meta, kept
+    return best_text, before, best_score, lock_meta, kept
 
 
 def humanize(
@@ -173,16 +179,13 @@ def humanize(
         accepted = 0
         for index in flagged:
             span = spans[index]
-            try:
-                candidates = rewriter.rewrite(span.text, n=settings.best_of_n)
-            except Exception:
-                candidates = []
             rewritten, before, after, locks, kept = _pick_candidate(
                 span.text,
-                candidates,
+                rewriter=rewriter,
                 detector=detector,
                 gate=semantic_gate,
                 threshold=settings.min_semantic_similarity,
+                best_of_n=settings.best_of_n,
             )
             lock_report.extend(locks)
             if kept:

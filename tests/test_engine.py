@@ -8,6 +8,23 @@ from adh.rewriter import IdentityRewriter, ScriptedRewriter
 from tests.conftest import CueDetector
 
 
+class StripCueRewriter:
+    """Keep lock sentinels, drop stock AI openers."""
+
+    name = "strip-cue"
+
+    def rewrite(self, sentence: str, *, n: int = 1) -> list[str]:
+        rewritten = sentence
+        for cue in (
+            "Furthermore, ",
+            "furthermore, ",
+            "it is important to note ",
+        ):
+            rewritten = rewritten.replace(cue, "")
+        rewritten = rewritten.strip() or sentence
+        return [rewritten] * n
+
+
 def test_empty_input_raises(lexical_gate) -> None:
     with pytest.raises(InputError):
         humanize(
@@ -32,17 +49,10 @@ def test_already_below_target(lexical_gate) -> None:
 
 
 def test_loop_rewrites_flagged_sentence(lexical_gate) -> None:
-    rewriter = ScriptedRewriter(
-        {
-            "Furthermore, the method is important to note in 2024.": [
-                "The method mattered in 2024."
-            ]
-        }
-    )
     report = humanize(
         "Furthermore, the method is important to note in 2024.",
         detector=CueDetector(),
-        rewriter=rewriter,
+        rewriter=StripCueRewriter(),
         semantic_gate=lexical_gate,
         config=EngineConfig(
             target_score=30,
