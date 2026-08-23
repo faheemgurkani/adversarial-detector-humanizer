@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import pytest
+
+from adh.engine import EngineConfig, humanize
+from adh.exceptions import InputError
+from adh.rewriter import IdentityRewriter, ScriptedRewriter
+from tests.conftest import CueDetector
+
+
+def test_empty_input_raises(lexical_gate) -> None:
+    with pytest.raises(InputError):
+        humanize(
+            "  ",
+            detector=CueDetector(),
+            rewriter=IdentityRewriter(),
+            semantic_gate=lexical_gate,
+        )
+
+
+def test_already_below_target(lexical_gate) -> None:
+    report = humanize(
+        "This is a human sentence.",
+        detector=CueDetector(),
+        rewriter=IdentityRewriter(),
+        semantic_gate=lexical_gate,
+        config=EngineConfig(target_score=30),
+    )
+    assert report.stop_reason == "already_below_target"
+    assert report.rounds == 0
+    assert report.output_text == report.input_text
+
+
+def test_loop_rewrites_flagged_sentence(lexical_gate) -> None:
+    rewriter = ScriptedRewriter(
+        {
+            "Furthermore, the method is important to note in 2024.": [
+                "The method mattered in 2024."
+            ]
+        }
+    )
+    report = humanize(
+        "Furthermore, the method is important to note in 2024.",
+        detector=CueDetector(),
+        rewriter=rewriter,
+        semantic_gate=lexical_gate,
+        config=EngineConfig(
+            target_score=30,
+            max_rounds=3,
+            sentence_threshold=50,
+            min_semantic_similarity=0.2,
+        ),
+    )
+    assert report.score_after < report.score_before
+    assert report.stop_reason == "passed"
+    assert "Furthermore" not in report.output_text
+
+
+def test_max_rounds_keeps_best(lexical_gate) -> None:
+    rewriter = IdentityRewriter()
+    report = humanize(
+        "Furthermore, the landscape is important to note.",
+        detector=CueDetector(),
+        rewriter=rewriter,
+        semantic_gate=lexical_gate,
+        config=EngineConfig(target_score=5, max_rounds=2, min_semantic_similarity=0.1),
+    )
+    assert report.stop_reason in {"max_rounds", "all_candidates_rejected"}
+    assert report.rounds >= 1
+
+
+def test_all_candidates_rejected_on_meaning_drift(lexical_gate) -> None:
+    rewriter = ScriptedRewriter(
+        {
+            "Furthermore, budgets were approved tonight.": [
+                "Purple elephants invented jazz yesterday."
+            ]
+        }
+    )
+    report = humanize(
+        "Furthermore, budgets were approved tonight.",
+        detector=CueDetector(),
+        rewriter=rewriter,
+        semantic_gate=lexical_gate,
+        config=EngineConfig(
+            target_score=10,
+            max_rounds=2,
+            min_semantic_similarity=0.85,
+        ),
+    )
+    assert report.stop_reason == "all_candidates_rejected"
+    assert report.output_text == report.input_text
