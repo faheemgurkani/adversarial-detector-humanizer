@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -239,11 +239,17 @@ class GPTZeroDetector:
 
 
 class EnsembleDetector:
-    """Average scores from multiple detectors. Requires ready members."""
+    """Combine scores from multiple detectors."""
 
     name = "ensemble"
 
-    def __init__(self, detectors: list[Any], *, weights: list[float] | None = None) -> None:
+    def __init__(
+        self,
+        detectors: list[Any],
+        *,
+        weights: list[float] | None = None,
+        aggregate: Literal["mean", "max"] = "max",
+    ) -> None:
         if not detectors:
             raise ValueError("ensemble requires at least one detector")
         if weights is not None and len(weights) != len(detectors):
@@ -251,6 +257,7 @@ class EnsembleDetector:
         if weights is not None and any(weight < 0 for weight in weights):
             raise ValueError("weights must be non-negative")
         self.detectors = list(detectors)
+        self.aggregate = aggregate
         if weights is None:
             self.weights = [1.0] * len(detectors)
         else:
@@ -259,12 +266,16 @@ class EnsembleDetector:
                 raise ValueError("weights must sum to a positive value")
             self.weights = [weight / total for weight in weights]
 
+    def _aggregate(self, scores: list[float]) -> float:
+        if self.aggregate == "max":
+            return round(max(scores), 4)
+        blended = sum(score * weight for score, weight in zip(scores, self.weights, strict=True))
+        return round(blended, 4)
+
     def score(self, text: str) -> ScoreResult:
         require_text(text)
-        blended = 0.0
-        for detector, weight in zip(self.detectors, self.weights, strict=True):
-            blended += detector.score(text).score * weight
-        score = round(blended, 4)
+        scores = [detector.score(text).score for detector in self.detectors]
+        score = self._aggregate(scores)
         return ScoreResult(score=score, label=score_to_label(score))
 
     def score_spans(self, texts: list[str]) -> list[ScoreResult]:
@@ -273,9 +284,7 @@ class EnsembleDetector:
         matrices = [detector.score_spans(texts) for detector in self.detectors]
         results: list[ScoreResult] = []
         for index in range(len(texts)):
-            blended = 0.0
-            for row, weight in zip(matrices, self.weights, strict=True):
-                blended += row[index].score * weight
-            score = round(blended, 4)
+            scores = [row[index].score for row in matrices]
+            score = self._aggregate(scores)
             results.append(ScoreResult(score=score, label=score_to_label(score)))
         return results
