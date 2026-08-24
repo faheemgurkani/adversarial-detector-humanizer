@@ -152,6 +152,7 @@ def create_app(
                 semantic_gate=gate,
                 config=EngineConfig(
                     target_score=payload.target_score,
+                    verdict_score=payload.verdict_score,
                     max_rounds=payload.max_rounds,
                     sentence_threshold=payload.sentence_threshold,
                     min_semantic_similarity=payload.min_semantic_similarity,
@@ -159,6 +160,10 @@ def create_app(
                     best_of_n=payload.best_of_n,
                     rewriter_model=payload.rewriter_model or "gpt-4o-mini",
                     detector=loaded.name,
+                    meaning_gate_mode=payload.meaning_gate_mode,
+                    allow_lexical_gate=payload.allow_lexical_gate,
+                    verify_detectors=payload.verify,
+                    verify_threshold=payload.verify_threshold,
                 ),
             )
         except AdhError as error:
