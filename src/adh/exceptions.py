@@ -14,7 +14,11 @@ class DetectorNotReadyError(AdhError, RuntimeError):
 
 
 class RemoteDetectorUnavailableError(AdhError, RuntimeError):
-    """A later-phase remote detector was requested but is not implemented."""
+    """A remote detector was requested for an unsupported code path."""
+
+
+class RemoteDetectorError(AdhError, RuntimeError):
+    """A remote detector API call failed or returned an unusable response."""
 
 
 class PreserveLockError(AdhError, ValueError):

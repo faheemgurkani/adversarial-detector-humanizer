@@ -7,6 +7,7 @@ from adh.exceptions import (
     InputError,
     PreserveLockError,
     RemoteDetectorUnavailableError,
+    RemoteDetectorError,
     RewriterError,
     SemanticBackendError,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "InputError",
     "PreserveLockError",
     "RemoteDetectorUnavailableError",
+    "RemoteDetectorError",
     "RewriterError",
     "RunReport",
     "SemanticBackendError",

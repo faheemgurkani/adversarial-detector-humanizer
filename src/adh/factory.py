@@ -7,7 +7,12 @@ from pathlib import Path
 from adh.detectors.base import Detector
 from adh.detectors.fake import FakeDetector
 from adh.detectors.local_raschka import LocalRaschkaDetector
-from adh.detectors.remote import EnsembleDetector, GPTZeroDetector, PangramDetector
+from adh.detectors.remote import (
+    EnsembleDetector,
+    GPTZeroDetector,
+    PangramDetector,
+    assert_inner_loop_detector,
+)
 from adh.exceptions import InputError
 from adh.models import DEFAULT_MODEL
 from adh.rewriter import OpenAICompatibleRewriter, Rewriter

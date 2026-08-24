@@ -14,11 +14,12 @@ from adh.exceptions import (
     DetectorNotReadyError,
     InputError,
     PreserveLockError,
+    RemoteDetectorError,
     RemoteDetectorUnavailableError,
     RewriterError,
     SemanticBackendError,
 )
-from adh.factory import load_detector, load_gate, load_rewriter
+from adh.factory import assert_inner_loop_detector, load_detector, load_gate, load_rewriter
 from adh.models import DEFAULT_MODEL, list_models
 from adh.report import RunReport
 from adh.rewriter import Rewriter
@@ -39,6 +40,7 @@ _STATUS = {
     InputError: 422,
     PreserveLockError: 422,
     RemoteDetectorUnavailableError: 501,
+    RemoteDetectorError: 502,
     RewriterError: 502,
     DetectorNotReadyError: 503,
     SemanticBackendError: 503,
@@ -139,6 +141,7 @@ def create_app(
         payload: HumanizeRequest,
     ) -> RunReport | CompactHumanizeResponse:
         try:
+            assert_inner_loop_detector(payload.detector)
             loaded = resolve_detector(payload.detector)
             gate = resolve_gate(payload.semantic, payload.allow_lexical_gate)
             writer = resolve_rewriter(payload.rewriter_model)

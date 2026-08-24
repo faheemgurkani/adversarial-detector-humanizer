@@ -4,8 +4,8 @@ import pytest
 
 from adh.detectors.base import ScoreResult, probability_to_result
 from adh.detectors.fake import FakeDetector
-from adh.detectors.remote import EnsembleDetector, GPTZeroDetector, PangramDetector
-from adh.exceptions import InputError, RemoteDetectorUnavailableError
+from adh.detectors.remote import EnsembleDetector
+from adh.exceptions import InputError
 from adh.factory import load_detector
 from adh.report import score_to_label
 
@@ -35,13 +35,6 @@ def test_fake_detector_empty_raises() -> None:
     with pytest.raises(InputError):
         FakeDetector().score(" ")
 
-
-def test_remote_stubs_raise() -> None:
-    with pytest.raises(RemoteDetectorUnavailableError):
-        PangramDetector().score("Some long enough text.")
-    with pytest.raises(RemoteDetectorUnavailableError):
-        GPTZeroDetector().score_spans(["Some long enough text."])
-    assert GPTZeroDetector().score_spans([]) == []
 
 
 def test_ensemble_weights() -> None:

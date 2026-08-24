@@ -14,7 +14,7 @@ from rich.table import Table
 
 from adh.engine import EngineConfig, humanize
 from adh.exceptions import AdhError, InputError
-from adh.factory import load_detector, load_gate, load_rewriter
+from adh.factory import assert_inner_loop_detector, load_detector, load_gate, load_rewriter
 from adh.models import DEFAULT_MODEL, fetch_models, list_models
 from adh.report import score_to_label
 
@@ -153,6 +153,7 @@ def humanize_cmd(
     """Rewrite only flagged sentences until the detector score drops or rounds end."""
     try:
         payload = _read_input(text, file)
+        assert_inner_loop_detector(detector)
         loaded = load_detector(detector, models_dir=models_dir, device=device)
         gate = load_gate(prefer=semantic, allow_lexical=allow_lexical)
         rewriter = load_rewriter(model=rewriter_model)

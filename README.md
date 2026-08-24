@@ -18,7 +18,7 @@ Score → flag sentences → preserve-lock facts → register-shift rewrite
 - **Preserve-lock** for numbers, URLs, emails, DOIs, quotes, code, acronyms, names
 - **Semantic gate** so meaning cannot silently flip
 - **Local Raschka detectors** as the free/dev verifier
-- **Remote stubs** for Pangram and GPTZero so a later hosted tier can plug in
+- **Remote adapters** for Pangram 4 and GPTZero v2 (`adh score` verification)
 
 Local scores are proxies. They correlate with tools such as Pangram; they are not Pangram.
 
@@ -53,7 +53,7 @@ python -m pip install -e ".[dev]"
 cp .env.example .env
 ```
 
-Edit `.env` and set `OPENAI_API_KEY` (and optionally `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL`) before `adh humanize`. The CLI loads `.env` from the working directory. GPTZero and Pangram keys are reserved for later and are ignored today.
+Edit `.env` and set `OPENAI_API_KEY` (and optionally `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL`) before `adh humanize`. The CLI loads `.env` from the working directory. For verification scoring, add `PANGRAM_API_KEY` and/or `GPTZERO_API_KEY` and use `adh score --detector pangram|gptzero` (not supported as the humanize inner loop).
 
 Local neural detectors and MiniLM need the `local` extra:
 

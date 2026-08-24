@@ -23,7 +23,7 @@ Adapters:
 
 - `LocalRaschkaDetector` — published HF exports from rasbt
 - `FakeDetector` / `CueDetector` (tests)
-- `PangramDetector`, `GPTZeroDetector` — raise `RemoteDetectorUnavailableError` in open-core
+- `PangramDetector`, `GPTZeroDetector` — remote verification via REST (`adh score`); blocked in `humanize` inner loop
 - `EnsembleDetector` — weighted blend of ready members
 
 Default quality model: `qwen3-variable`. Faster: `distilbert`. CI: `fake` or `logreg` when present.

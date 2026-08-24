@@ -18,7 +18,7 @@ def test_env_example_documents_rewriter_and_reserved_keys() -> None:
         "GPTZERO_API_KEY",
     ):
         assert key in text
-    assert "not wired up yet" in text.lower()
+    assert "not wired up yet" in text.lower() or "verification scoring" in text.lower()
 
 
 def test_setup_doc_exists() -> None:

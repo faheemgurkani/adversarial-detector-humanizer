@@ -4,7 +4,7 @@ This is the setup guide for the open-core CLI, library, and local HTTP API.
 
 Python **3.11** is the supported version for this repository. Python 3.12 usually works; 3.10 does not.
 
-GPTZero and Pangram are **not** part of setup yet. Leave those keys commented out. Local Raschka detectors plus an OpenAI-compatible rewriter are enough to run the loop.
+GPTZero and Pangram are **verification detectors**. Set their keys in `.env`, then score with `--detector pangram` or `--detector gptzero`. They cannot drive the `humanize` inner loop (too slow and billed per call).
 
 ## What you need
 
@@ -87,8 +87,8 @@ Edit `.env` and set at least the rewriter values you will use. The CLI loads `.e
 | `ADH_REWRITER_MODEL` | rewriter | `gpt-4o-mini` | Must exist on that provider |
 | `ADH_MODELS_DIR` | local detectors | `~/.cache/adversarial-detector-humanizer/models/` | Override cache location |
 | `HF_TOKEN` | Hub downloads | unset | Optional; public Raschka exports do not need it |
-| `PANGRAM_API_KEY` | later | unset | Ignored today |
-| `GPTZERO_API_KEY` | later | unset | Ignored today |
+| `PANGRAM_API_KEY` | `adh score --detector pangram` | unset | Post-loop verification; not for `humanize` loop |
+| `GPTZERO_API_KEY` | `adh score --detector gptzero` | unset | Post-loop verification; not for `humanize` loop |
 
 Provider snippets are commented in `.env.example`.
 
@@ -133,6 +133,13 @@ With a fetched local detector and MiniLM:
 
 ```bash
 adh humanize --detector distilbert --file examples/sample.txt --json --output out.txt
+```
+
+Verify with commercial detectors after humanizing (requires API keys in `.env`):
+
+```bash
+adh score --detector pangram --file out.txt
+adh score --detector gptzero --file out.txt
 ```
 
 Pipe input:

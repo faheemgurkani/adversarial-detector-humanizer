@@ -33,6 +33,7 @@ All domain errors are `AdhError` subclasses mapped as:
 |-----------|------|------|
 | `InputError`, `PreserveLockError` | 422 | Empty text, bad detector name, extra JSON fields (Pydantic), lock restore |
 | `RemoteDetectorUnavailableError` | 501 | `pangram` / `gptzero` used as the inner-loop detector |
+| `RemoteDetectorError` | 502 | Pangram or GPTZero HTTP/API failure |
 | `RewriterError` | 502 | Missing API key, upstream LLM HTTP error, empty candidates |
 | `DetectorNotReadyError`, `SemanticBackendError` | 503 | Weights missing, MiniLM extra missing |
 | Unmapped `AdhError` | 400 | Fallback |
