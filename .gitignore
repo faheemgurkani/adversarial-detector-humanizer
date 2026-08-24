@@ -47,3 +47,6 @@ models/
 reports/
 tmp/
 .adh-cache/
+
+docs/resources/
+docs/future_work_plans/
