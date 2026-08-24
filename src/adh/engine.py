@@ -27,19 +27,6 @@ class EngineConfig(BaseModel):
     detector: str = "qwen3-variable"
 
 
-@dataclass
-class _Candidate:
-    index: int
-    original: str
-    rewritten: str
-    score_before: float
-    score_after: float
-    kept: bool
-    start: int
-    end: int
-    locks: list[LockRecord]
-
-
 def _word_count(text: str) -> int:
     return len(text.split())
 

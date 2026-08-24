@@ -51,3 +51,13 @@ def test_quoted_span_is_locked() -> None:
     locked, lock = extract_locks(text)
     assert "keep this quote" not in locked
     assert restore_locks(locked, lock) == text
+
+
+def test_doi_isbn_and_acronym() -> None:
+    text = "See doi 10.1000/xyz123 and ISBN 978-1-4028-9462-6 from NASA HQ."
+    locked, lock = extract_locks(text)
+    restored = restore_locks(locked, lock)
+    assert restored == text
+    kinds = " ".join(span.text for span in lock.spans)
+    assert "10.1000/xyz123" in kinds or "10.1000/xyz123" in restored
+    assert "NASA" in kinds

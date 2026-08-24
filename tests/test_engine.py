@@ -100,3 +100,35 @@ def test_all_candidates_rejected_on_meaning_drift(lexical_gate) -> None:
     )
     assert report.stop_reason == "all_candidates_rejected"
     assert report.output_text == report.input_text
+
+
+def test_no_flagged_sentences_when_top_k_is_zero(lexical_gate) -> None:
+    report = humanize(
+        "Furthermore, the method is important to note.",
+        detector=CueDetector(),
+        rewriter=IdentityRewriter(),
+        semantic_gate=lexical_gate,
+        config=EngineConfig(
+            target_score=5,
+            sentence_threshold=99.9,
+            top_k_fallback=0,
+            min_semantic_similarity=0.1,
+        ),
+    )
+    assert report.stop_reason == "no_flagged_sentences"
+
+
+def test_max_rewrite_ratio_zero_stops(lexical_gate) -> None:
+    report = humanize(
+        "Furthermore, the method is important to note.",
+        detector=CueDetector(),
+        rewriter=StripCueRewriter(),
+        semantic_gate=lexical_gate,
+        config=EngineConfig(
+            target_score=5,
+            max_rewrite_ratio=0,
+            min_semantic_similarity=0.1,
+        ),
+    )
+    assert report.stop_reason == "max_rewrite_ratio"
+    assert report.output_text == report.input_text
