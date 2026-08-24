@@ -15,6 +15,8 @@ from adh.detectors.remote import (
 )
 from adh.exceptions import InputError
 from adh.models import DEFAULT_MODEL
+from adh.gates import build_meaning_gate_stack
+from adh.gates.stack import MeaningGateStack
 from adh.rewriter import OpenAICompatibleRewriter, Rewriter
 from adh.semantic import SemanticGate, build_semantic_gate
 
@@ -32,7 +34,9 @@ def load_detector(
     if name == "gptzero":
         return GPTZeroDetector()
     if name == "ensemble":
-        return EnsembleDetector([FakeDetector()])
+        return EnsembleDetector([FakeDetector()], aggregate="max")
+    if name == "ensemble-max":
+        return EnsembleDetector([FakeDetector()], aggregate="max")
     if name == DEFAULT_MODEL or name in {
         "logreg",
         "distilbert",
@@ -54,3 +58,7 @@ def load_rewriter(*, model: str | None = None) -> Rewriter:
 
 def load_gate(*, prefer: str = "auto", allow_lexical: bool = False) -> SemanticGate:
     return build_semantic_gate(prefer=prefer, allow_lexical=allow_lexical)
+
+
+def load_meaning_gate_stack(**kwargs) -> MeaningGateStack:
+    return build_meaning_gate_stack(**kwargs)
