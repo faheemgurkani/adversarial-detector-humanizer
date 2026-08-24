@@ -1,0 +1,5 @@
+{"id": "ai-01", "text": "Furthermore, it is important to note that the method improved accuracy in 2024.", "label": "ai-ish"}
+{"id": "ai-02", "text": "Moreover, the system leverages robust, seamless solutions across the landscape.", "label": "ai-ish"}
+{"id": "human-01", "text": "We shipped the fix on Tuesday after the cache bug showed up in staging.", "label": "human-ish"}
+{"id": "human-02", "text": "The clinic runs blood tests twice daily and logs results in the EHR.", "label": "human-ish"}
+{"id": "tech-01", "text": "Run with --detector fake on port 8000 and set OPENAI_API_KEY before starting.", "label": "technical"}
