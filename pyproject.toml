@@ -49,10 +49,16 @@ local = [
 pangram = [
   "pangram-sdk>=1.0",
 ]
+api = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+]
 dev = [
+  "fastapi>=0.115",
   "pytest>=8.3",
   "pytest-cov>=5.0",
   "ruff>=0.6",
+  "uvicorn>=0.30",
 ]
 
 [project.scripts]
