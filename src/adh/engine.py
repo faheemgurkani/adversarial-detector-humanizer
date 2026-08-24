@@ -6,29 +6,62 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from adh.detectors.base import Detector
 from adh.exceptions import InputError, PreserveLockError
-from adh.preserve import extract_locks, lock_records, restore_locks
+from adh.gates.stack import MeaningGateStack
+from adh.preserve import extract_locks, lock_records, restore_locks, sentinels_preserved
 from adh.report import LockRecord, RunReport, SentenceReport, StopReason
 from adh.rewriter import Rewriter
-from adh.semantic import SemanticGate, passes_gate
+from adh.scrub import scrub_text
+from adh.semantic import SemanticGate
 from adh.sentences import SentenceSpan, reassemble, split_sentences
+from adh.tells import score_tells
+from adh.verify import run_verification
+
+TELLS_EPS_SCORE = 2.0
 
 
 class EngineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     target_score: float = Field(default=30.0, ge=0.0, le=100.0)
+    verdict_score: float = Field(default=45.0, ge=0.0, le=100.0)
     max_rounds: int = Field(default=5, ge=1, le=20)
     sentence_threshold: float = Field(default=50.0, ge=0.0, le=100.0)
     min_semantic_similarity: float = Field(default=0.88, ge=0.0, le=1.0)
+    relaxed_semantic_similarity: float = Field(default=0.30, ge=0.0, le=1.0)
     max_rewrite_ratio: float = Field(default=0.4, ge=0.0, le=1.0)
-    best_of_n: int = Field(default=2, ge=1, le=8)
+    best_of_n: int = Field(default=3, ge=1, le=8)
     top_k_fallback: int = Field(default=1, ge=0, le=20)
     rewriter_model: str = "gpt-4o-mini"
     detector: str = "qwen3-variable"
+    meaning_gate_mode: str = "auto"
+    allow_lexical_gate: bool = False
+    enable_tells_tiebreak: bool = True
+    tells_tiebreak_epsilon: float = Field(default=TELLS_EPS_SCORE, ge=0.0, le=100.0)
+    scrub_input: bool = True
+    verify_detectors: list[str] = Field(default_factory=list)
+    verify_threshold: float = Field(default=45.0, ge=0.0, le=100.0)
+    verify_on_input: bool = True
 
 
 def _word_count(text: str) -> int:
     return len(text.split())
+
+
+def _build_gate_stack(config: EngineConfig, semantic_gate: SemanticGate | None) -> MeaningGateStack:
+    if semantic_gate is not None:
+        return MeaningGateStack(
+            semantic_gate=semantic_gate,
+            strict_semantic_similarity=config.min_semantic_similarity,
+            relaxed_semantic_similarity=config.relaxed_semantic_similarity,
+        )
+    from adh.gates import build_meaning_gate_stack
+
+    return build_meaning_gate_stack(
+        prefer=config.meaning_gate_mode,
+        allow_lexical=config.allow_lexical_gate,
+        strict_semantic_similarity=config.min_semantic_similarity,
+        relaxed_semantic_similarity=config.relaxed_semantic_similarity,
+    )
 
 
 def _flag_indices(
@@ -62,10 +95,11 @@ def _pick_candidate(
     *,
     rewriter: Rewriter,
     detector: Detector,
-    gate: SemanticGate,
-    threshold: float,
+    gate_stack: MeaningGateStack,
     best_of_n: int,
-) -> tuple[str, float, float, list[LockRecord], bool]:
+    enable_tells_tiebreak: bool,
+    tells_epsilon: float,
+) -> tuple[str, float, float, list[LockRecord], bool, int | None, list[str]]:
     locked, lock = extract_locks(original)
     lock_meta = [
         LockRecord(id=identifier, text=text, ok=True)
@@ -75,28 +109,40 @@ def _pick_candidate(
     best_text = original
     best_score = before
     kept = False
+    best_tells: int | None = None
+    best_vetoes: list[str] = []
     try:
         candidates = rewriter.rewrite(locked, n=best_of_n)
     except Exception:
         candidates = []
+
+    valid: list[tuple[str, float, int, list[LockRecord], float, list[str]]] = []
     for raw in candidates:
+        if not sentinels_preserved(locked, raw):
+            continue
         try:
             restored = restore_locks(raw, lock, strict=True)
         except PreserveLockError:
             continue
-        ok, _similarity = passes_gate(original, restored, gate, threshold)
-        if not ok:
+        result = gate_stack.evaluate(original, restored)
+        if not result.preserved:
             continue
         score = detector.score(restored).score
-        if score < best_score or (score == best_score and restored != original):
-            best_text = restored
-            best_score = score
-            kept = restored != original
-            lock_meta = [
-                LockRecord(id=identifier, text=text, ok=present)
-                for identifier, text, present in lock_records(lock, restored)
-            ]
-    return best_text, before, best_score, lock_meta, kept
+        tells = int(score_tells(restored)["tells"]) if enable_tells_tiebreak else 0
+        valid.append((restored, score, tells, lock_meta, result.similarity, result.vetoes))
+
+    if valid:
+        best_score_value = min(item[1] for item in valid)
+        pool = [item for item in valid if item[1] <= best_score_value + tells_epsilon]
+        chosen = min(pool, key=lambda item: (item[2], item[1]))
+        best_text, best_score, best_tells, lock_meta, _similarity, best_vetoes = chosen
+        kept = best_text != original
+        lock_meta = [
+            LockRecord(id=identifier, text=text, ok=present)
+            for identifier, text, present in lock_records(lock, best_text)
+        ]
+
+    return best_text, before, best_score, lock_meta, kept, best_tells, best_vetoes
 
 
 def humanize(
@@ -104,13 +150,23 @@ def humanize(
     *,
     detector: Detector,
     rewriter: Rewriter,
-    semantic_gate: SemanticGate,
+    semantic_gate: SemanticGate | None = None,
+    meaning_gate_stack: MeaningGateStack | None = None,
     config: EngineConfig | None = None,
 ) -> RunReport:
     """Run the score → flag → lock → rewrite → gate → rescore loop."""
     if not isinstance(text, str) or not text.strip():
         raise InputError("text cannot be empty")
     settings = config or EngineConfig()
+    original_input = text
+    hidden_removed = 0
+    if settings.scrub_input:
+        text, scrub_report = scrub_text(text)
+        hidden_removed = scrub_report.hidden_removed
+        if not text.strip():
+            raise InputError("text cannot be empty after scrub")
+
+    gate_stack = meaning_gate_stack or _build_gate_stack(settings, semantic_gate)
 
     spans = split_sentences(text)
     score_before = detector.score(text).score
@@ -125,10 +181,11 @@ def humanize(
     rewrite_ratio = 0.0
     stop_reason: StopReason = "max_rounds"
     rounds = 0
+    passed_verdict = score_before <= settings.verdict_score
 
     if score_before <= settings.target_score:
-        return RunReport(
-            input_text=text,
+        report = RunReport(
+            input_text=original_input,
             output_text=text,
             detector=detector.name,
             score_before=score_before,
@@ -140,7 +197,20 @@ def humanize(
             locks=[],
             flagged_count=0,
             rewrite_ratio=0.0,
+            meaning_gate=gate_stack.name,
+            passed_verdict=passed_verdict,
+            flagged=not passed_verdict,
+            hidden_removed=hidden_removed,
         )
+        if settings.verify_detectors:
+            report.verification = run_verification(
+                input_text=original_input,
+                output_text=report.output_text,
+                detectors=settings.verify_detectors,
+                threshold=settings.verify_threshold,
+                verify_on_input=settings.verify_on_input,
+            )
+        return report
 
     for _round in range(settings.max_rounds):
         rounds += 1
@@ -168,13 +238,14 @@ def humanize(
         accepted = 0
         for index in flagged:
             span = spans[index]
-            rewritten, before, after, locks, kept = _pick_candidate(
+            rewritten, before, after, locks, kept, tells_after, vetoes = _pick_candidate(
                 span.text,
                 rewriter=rewriter,
                 detector=detector,
-                gate=semantic_gate,
-                threshold=settings.min_semantic_similarity,
+                gate_stack=gate_stack,
                 best_of_n=settings.best_of_n,
+                enable_tells_tiebreak=settings.enable_tells_tiebreak,
+                tells_epsilon=settings.tells_tiebreak_epsilon,
             )
             lock_report.extend(locks)
             if kept:
@@ -190,6 +261,8 @@ def humanize(
                     kept=kept,
                     start=span.start,
                     end=span.end,
+                    tells_after=tells_after,
+                    gate_vetoes=vetoes,
                 )
             )
 
@@ -199,9 +272,8 @@ def humanize(
             break
 
         current = reassemble(current, replacements)
-        ok, similarity = passes_gate(text, current, semantic_gate, settings.min_semantic_similarity)
-        if not ok:
-            # Whole-document meaning drifted; keep the previous best and stop.
+        doc_result = gate_stack.evaluate(text, current)
+        if not doc_result.preserved:
             stop_reason = "all_candidates_rejected"
             sentence_reports = round_reports
             break
@@ -211,15 +283,16 @@ def humanize(
         if current_score < best_score:
             best_text = current
             best_score = current_score
-            best_similarity = similarity
+            best_similarity = doc_result.similarity
         if current_score <= settings.target_score:
             stop_reason = "passed"
             break
     else:
         stop_reason = "max_rounds"
 
-    return RunReport(
-        input_text=text,
+    passed_verdict = best_score <= settings.verdict_score
+    report = RunReport(
+        input_text=original_input,
         output_text=best_text,
         detector=detector.name,
         score_before=score_before,
@@ -231,4 +304,17 @@ def humanize(
         locks=lock_report,
         flagged_count=flagged_count,
         rewrite_ratio=round(rewrite_ratio, 4),
+        meaning_gate=gate_stack.name,
+        passed_verdict=passed_verdict,
+        flagged=not passed_verdict,
+        hidden_removed=hidden_removed,
     )
+    if settings.verify_detectors:
+        report.verification = run_verification(
+            input_text=original_input,
+            output_text=report.output_text,
+            detectors=settings.verify_detectors,
+            threshold=settings.verify_threshold,
+            verify_on_input=settings.verify_on_input,
+        )
+    return report
