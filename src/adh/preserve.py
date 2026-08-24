@@ -22,6 +22,23 @@ _YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
 _ACRONYM = re.compile(r"\b[A-Z]{2,}\b")
 _PROPER_NOUN = re.compile(r"\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b")
 
+_UNIT_NUMBER = re.compile(
+    r"\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:mg|g|kg|ml|l|ms|s|sec|min|hr|hours?|"
+    r"kb|mb|gb|tb|hz|khz|mhz|ghz|am|pm|utc)\b",
+    re.IGNORECASE,
+)
+_CURRENCY = re.compile(r"(?:[$€£]\s?\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s?(?:USD|EUR|GBP))")
+_TIME = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\s?(?:AM|PM|UTC)?\b", re.IGNORECASE)
+_ENV_VAR = re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b")
+_CLI_FLAG = re.compile(r"(?<!\w)(?:--[a-zA-Z][\w-]*|-[a-zA-HJ-NP-Z])\b")
+_PATH = re.compile(
+    r"(?<!\w)(?:[\w.-]+/)+[\w.-]+\.(?:py|js|ts|tsx|json|md|txt|yaml|yml|toml|csv)\b"
+)
+_UUID = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+_SEMVER = re.compile(r"\b\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\b")
+
 _PATTERNS: tuple[re.Pattern[str], ...] = (
     _CODE_FENCE,
     _INLINE_CODE,
@@ -30,6 +47,14 @@ _PATTERNS: tuple[re.Pattern[str], ...] = (
     _DOI,
     _ISBN,
     _QUOTED,
+    _UNIT_NUMBER,
+    _CURRENCY,
+    _TIME,
+    _PATH,
+    _UUID,
+    _SEMVER,
+    _CLI_FLAG,
+    _ENV_VAR,
     _PERCENT,
     _YEAR,
     _NUMBER,
