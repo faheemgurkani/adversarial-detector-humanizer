@@ -19,7 +19,8 @@ Install `[local]` only when you need Raschka model inference or MiniLM.
 3. Do not add regex phrase-swappers or silent fallbacks when a rewriter key is missing.
 4. Do not call Pangram or GPTZero inside the inner loop.
 5. Add tests for edge cases (empty input, lock restoration, meaning drift, max rounds).
-6. Run `python -m pytest` before you open a pull request.
+6. HTTP routes live in `src/adh/api.py` and must stay covered by `tests/test_api.py`. Contract: `docs/BACKEND_PRD.md`.
+7. Run `python -m pytest` before you open a pull request.
 
 ## Commit style
 
