@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from dotenv import find_dotenv, load_dotenv
 from rich.console import Console
 from rich.table import Table
 
@@ -16,6 +17,8 @@ from adh.exceptions import AdhError, InputError
 from adh.factory import load_detector, load_gate, load_rewriter
 from adh.models import DEFAULT_MODEL, fetch_models, list_models
 from adh.report import score_to_label
+
+load_dotenv(find_dotenv(usecwd=True))
 
 app = typer.Typer(
     help="Detector-verified, sentence-targeted, meaning-preserving humanizer.",

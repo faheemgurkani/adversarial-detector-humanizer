@@ -40,6 +40,19 @@ Default quality model: `qwen3-variable`. Faster: `distilbert`. CI: `fake` or `lo
 
 The engine always returns a report, including the best intermediate text.
 
+## Environment
+
+The CLI loads `.env` from the working directory via python-dotenv. Template: [`.env.example`](../.env.example). Setup: [SETUP.md](SETUP.md).
+
+Used today:
+
+- `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL` — OpenAI-compatible rewriter
+- `ADH_MODELS_DIR` — local Raschka artifact cache
+
+Reserved, unused until remote detectors ship:
+
+- `PANGRAM_API_KEY`, `GPTZERO_API_KEY`
+
 ## HTTP
 
 See [BACKEND_PRD.md](BACKEND_PRD.md). Routes: `GET /health`, `GET /v1/models`, `POST /v1/score`, `POST /v1/humanize`, `POST /v1/sentences`.

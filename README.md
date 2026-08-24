@@ -41,12 +41,19 @@ This product applies published techniques. It is not a paper.
 
 ## Setup (Python 3.11)
 
+Step-by-step extras, env vars, model fetch, API, and troubleshooting: **[docs/SETUP.md](docs/SETUP.md)**.
+
 ```bash
+git clone https://github.com/faheemgurkani/adversarial-detector-humanizer.git
+cd adversarial-detector-humanizer
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
+cp .env.example .env
 ```
+
+Edit `.env` and set `OPENAI_API_KEY` (and optionally `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL`) before `adh humanize`. The CLI loads `.env` from the working directory. GPTZero and Pangram keys are reserved for later and are ignored today.
 
 Local neural detectors and MiniLM need the `local` extra:
 
@@ -138,8 +145,10 @@ CI uses `FakeDetector` and a lexical gate. No GPU and no paid APIs are required.
 ```
 src/adh/            engine, CLI, preserve-lock, semantic gate, detectors
 tests/              unit tests for every module
+docs/SETUP.md       clone, venv, extras, .env, first commands
 docs/PRODUCT.md     later SaaS / API / extension PRD
 docs/ARCHITECTURE.md
+.env.example        rewriter and optional detector env template
 examples/sample.txt
 ```
 

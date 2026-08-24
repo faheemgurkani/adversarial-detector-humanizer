@@ -2,15 +2,18 @@
 
 ## Environment
 
+Full install, extras, and `.env` notes: [docs/SETUP.md](docs/SETUP.md).
+
 Use Python 3.11 and the project virtualenv:
 
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
+cp .env.example .env
 ```
 
-Install `[local]` only when you need Raschka model inference or MiniLM.
+Install `[local]` only when you need Raschka model inference or MiniLM. Do not treat Pangram or GPTZero extras as part of the current contributor setup.
 
 ## Workflow
 
