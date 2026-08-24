@@ -135,11 +135,15 @@ def humanize_cmd(
     device: str = typer.Option("auto", "--device"),
     models_dir: Optional[Path] = typer.Option(None, "--models-dir"),
     target: float = typer.Option(30.0, "--target", min=0.0, max=100.0),
+    verdict: float = typer.Option(45.0, "--verdict-score", min=0.0, max=100.0),
     max_rounds: int = typer.Option(5, "--max-rounds", min=1, max=20),
     sentence_threshold: float = typer.Option(50.0, "--sentence-threshold"),
     min_semantic: float = typer.Option(0.88, "--min-semantic"),
     max_rewrite_ratio: float = typer.Option(0.4, "--max-rewrite-ratio"),
-    best_of: int = typer.Option(2, "--best-of", min=1, max=8),
+    best_of: int = typer.Option(3, "--best-of", min=1, max=8),
+    verify: Optional[str] = typer.Option(None, "--verify", help="Comma-separated pangram,gptzero."),
+    verify_threshold: float = typer.Option(45.0, "--verify-threshold"),
+    meaning_gate: str = typer.Option("auto", "--meaning-gate", help="auto, minilm, lexical, or full."),
     rewriter_model: Optional[str] = typer.Option(None, "--rewriter-model"),
     semantic: str = typer.Option("auto", "--semantic", help="auto, minilm, or lexical."),
     allow_lexical: bool = typer.Option(
@@ -157,6 +161,7 @@ def humanize_cmd(
         loaded = load_detector(detector, models_dir=models_dir, device=device)
         gate = load_gate(prefer=semantic, allow_lexical=allow_lexical)
         rewriter = load_rewriter(model=rewriter_model)
+        verify_detectors = [item.strip() for item in verify.split(",") if item.strip()] if verify else []
         report = humanize(
             payload,
             detector=loaded,
@@ -164,6 +169,7 @@ def humanize_cmd(
             semantic_gate=gate,
             config=EngineConfig(
                 target_score=target,
+                verdict_score=verdict,
                 max_rounds=max_rounds,
                 sentence_threshold=sentence_threshold,
                 min_semantic_similarity=min_semantic,
@@ -171,6 +177,10 @@ def humanize_cmd(
                 best_of_n=best_of,
                 rewriter_model=rewriter_model or "gpt-4o-mini",
                 detector=detector,
+                meaning_gate_mode=meaning_gate,
+                allow_lexical_gate=allow_lexical,
+                verify_detectors=verify_detectors,
+                verify_threshold=verify_threshold,
             ),
         )
     except AdhError as error:
