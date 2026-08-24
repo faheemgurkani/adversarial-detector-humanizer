@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from adh.detectors.base import Detector
@@ -24,7 +22,7 @@ class EngineConfig(BaseModel):
     min_semantic_similarity: float = Field(default=0.88, ge=0.0, le=1.0)
     max_rewrite_ratio: float = Field(default=0.4, ge=0.0, le=1.0)
     best_of_n: int = Field(default=2, ge=1, le=8)
-    top_k_fallback: int = Field(default=1, ge=1, le=20)
+    top_k_fallback: int = Field(default=1, ge=0, le=20)
     rewriter_model: str = "gpt-4o-mini"
     detector: str = "qwen3-variable"
 
@@ -55,7 +53,7 @@ def _flag_indices(
     max_rewrite_ratio: float,
 ) -> list[int]:
     flagged = [index for index, score in enumerate(scores) if score >= threshold]
-    if not flagged:
+    if not flagged and top_k > 0:
         ranked = sorted(range(len(scores)), key=lambda index: scores[index], reverse=True)
         flagged = ranked[: min(top_k, len(ranked))]
     total_words = max(1, sum(_word_count(span.text) for span in spans))
@@ -65,6 +63,8 @@ def _flag_indices(
         next_words = used_words + _word_count(spans[index].text)
         if selected and next_words / total_words > max_rewrite_ratio:
             continue
+        if not selected and max_rewrite_ratio == 0:
+            break
         selected.append(index)
         used_words = next_words
     return sorted(selected)
@@ -171,7 +171,9 @@ def humanize(
         rewrite_ratio = sum(_word_count(spans[index].text) for index in flagged) / total_words
 
         if not flagged:
-            stop_reason = "no_flagged_sentences"
+            stop_reason = (
+                "max_rewrite_ratio" if settings.max_rewrite_ratio == 0 else "no_flagged_sentences"
+            )
             break
 
         replacements: dict[int, str] = {}

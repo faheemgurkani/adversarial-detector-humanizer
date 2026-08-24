@@ -69,10 +69,59 @@ def score(
         _fail(error)
         return
     if as_json:
-        typer.echo(json.dumps(result.__dict__, default=lambda item: item.__dict__, indent=2))
+        payload_json = {
+            "detector": loaded.name,
+            "score": result.score,
+            "label": result.label,
+            "windows": [
+                {
+                    "text": window.text,
+                    "score": window.score,
+                    "label": window.label,
+                    "start": window.start,
+                    "end": window.end,
+                }
+                for window in result.windows
+            ],
+        }
+        typer.echo(json.dumps(payload_json, indent=2))
         return
     console.print(f"detector: {loaded.name}")
     console.print(f"score: {result.score:.4f} ({result.label})")
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8000, "--port", min=1, max=65535),
+    detector: str = typer.Option("fake", "--detector", help="Bound detector for this process."),
+    device: str = typer.Option("auto", "--device"),
+    models_dir: Optional[Path] = typer.Option(None, "--models-dir"),
+    semantic: str = typer.Option("lexical", "--semantic"),
+    allow_lexical: bool = typer.Option(True, "--allow-lexical-gate/--no-allow-lexical-gate"),
+) -> None:
+    """Serve the local HTTP API on 127.0.0.1 by default."""
+    try:
+        import uvicorn
+    except ImportError as error:
+        _fail(error)
+        return
+    try:
+        from adh.api import create_app
+
+        loaded = load_detector(detector, models_dir=models_dir, device=device)
+        gate = load_gate(prefer=semantic, allow_lexical=allow_lexical)
+        application = create_app(
+            detector=loaded,
+            semantic_gate=gate,
+            default_detector=detector,
+            device=device,
+            models_dir=models_dir,
+        )
+    except AdhError as error:
+        _fail(error)
+        return
+    uvicorn.run(application, host=host, port=port, log_level="info")
 
 
 @app.command("humanize")
