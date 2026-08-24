@@ -52,3 +52,27 @@ def test_humanize_without_key_fails(monkeypatch) -> None:
         ],
     )
     assert result.exit_code == 1
+
+
+def test_score_from_file(tmp_path) -> None:
+    path = tmp_path / "draft.txt"
+    path.write_text("A complete sentence for scoring from a file.", encoding="utf-8")
+    result = runner.invoke(app, ["score", "--detector", "fake", "--file", str(path), "--json"])
+    assert result.exit_code == 0
+    assert "80" in result.stdout
+
+
+def test_score_rejects_text_and_file_together(tmp_path) -> None:
+    path = tmp_path / "draft.txt"
+    path.write_text("hello world again here", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        ["score", "--detector", "fake", "--text", "hello", "--file", str(path)],
+    )
+    assert result.exit_code == 1
+
+
+def test_serve_help() -> None:
+    result = runner.invoke(app, ["serve", "--help"])
+    assert result.exit_code == 0
+    assert "--host" in result.stdout

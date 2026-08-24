@@ -1,6 +1,8 @@
 # Product PRD (later phases)
 
-The open-core engine in this repository is the source of truth. Hosted surfaces must call `adh.engine.humanize` and return a `RunReport`. Do not reimplement the loop in JavaScript.
+HTTP contracts for the **current** open-core server live in [BACKEND_PRD.md](BACKEND_PRD.md). This file covers hosted follow-on work that is not in the local process.
+
+The engine in this repository is the source of truth. Hosted surfaces must call `adh.engine.humanize` (via `POST /v1/humanize`) and return a `RunReport`. Do not reimplement the loop in JavaScript.
 
 ## Positioning
 

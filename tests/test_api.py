@@ -20,6 +20,14 @@ def _client(**kwargs) -> TestClient:
     return TestClient(app)
 
 
+def test_openapi_docs() -> None:
+    response = _client().get("/openapi.json")
+    assert response.status_code == 200
+    paths = response.json()["paths"]
+    for path in ("/health", "/v1/models", "/v1/score", "/v1/humanize", "/v1/sentences"):
+        assert path in paths
+
+
 def test_health() -> None:
     response = _client().get("/health")
     assert response.status_code == 200

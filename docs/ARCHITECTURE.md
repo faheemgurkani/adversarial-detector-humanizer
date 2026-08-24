@@ -39,3 +39,7 @@ Default quality model: `qwen3-variable`. Faster: `distilbert`. CI: `fake` or `lo
 `passed`, `max_rounds`, `no_flagged_sentences`, `all_candidates_rejected`, `max_rewrite_ratio`, `already_below_target`
 
 The engine always returns a report, including the best intermediate text.
+
+## HTTP
+
+See [BACKEND_PRD.md](BACKEND_PRD.md). Routes: `GET /health`, `GET /v1/models`, `POST /v1/score`, `POST /v1/humanize`, `POST /v1/sentences`.

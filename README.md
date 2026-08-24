@@ -82,7 +82,25 @@ JSON `RunReport`:
 adh humanize --file examples/sample.txt --json --output out.txt
 ```
 
-The report includes `score_before`, `score_after`, `semantic_similarity`, per-sentence diffs, and lock records. That object is the seed for a later `POST /v1/humanize` API.
+The report includes `score_before`, `score_after`, `semantic_similarity`, per-sentence diffs, and lock records. That object is the seed for `POST /v1/humanize`.
+
+## HTTP API
+
+Install `[api]` or `[dev]`, then:
+
+```bash
+adh serve --host 127.0.0.1 --port 8000 --detector fake --semantic lexical
+```
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/health` | Liveness |
+| GET | `/v1/models` | Published detector artifacts |
+| POST | `/v1/score` | 0–100 AI score |
+| POST | `/v1/humanize` | Closed-loop rewrite + `RunReport` |
+| POST | `/v1/sentences` | Offset-preserving split |
+
+Interactive docs: `http://127.0.0.1:8000/docs`. Full contract: [docs/BACKEND_PRD.md](docs/BACKEND_PRD.md).
 
 ## Library
 
