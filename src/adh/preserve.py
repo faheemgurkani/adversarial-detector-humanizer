@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import secrets
+from collections import Counter
 from dataclasses import dataclass, field
 
 from adh.exceptions import PreserveLockError
@@ -36,7 +37,8 @@ _PATTERNS: tuple[re.Pattern[str], ...] = (
     _PROPER_NOUN,
 )
 
-_SENTINEL_RE = re.compile(r"__LOCK_[A-Z0-9]+_\d{3,}__")
+SENTINEL_RE = re.compile(r"__LOCK_[A-Z0-9]+_\d{3,}__")
+_SENTINEL_RE = SENTINEL_RE
 
 
 @dataclass(frozen=True)
@@ -134,6 +136,14 @@ def restore_locks(text: str, lock: PreserveLock, *, strict: bool = True) -> str:
             f"rewriter dropped locked spans: {missing}"
         )
     return restored
+
+
+def sentinel_multiset(text: str) -> Counter[str]:
+    return Counter(SENTINEL_RE.findall(text))
+
+
+def sentinels_preserved(source_masked: str, candidate_masked: str) -> bool:
+    return sentinel_multiset(source_masked) == sentinel_multiset(candidate_masked)
 
 
 def lock_records(lock: PreserveLock, restored_text: str) -> list[tuple[str, str, bool]]:
