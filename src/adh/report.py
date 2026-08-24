@@ -46,6 +46,28 @@ class SentenceReport(BaseModel):
     kept: bool
     start: int
     end: int
+    tells_after: int | None = None
+    gate_vetoes: list[str] = Field(default_factory=list)
+
+
+class DetectorVerifyResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    score_before: float
+    score_after: float
+    label_before: str
+    label_after: str
+    passed: bool
+    error: str | None = None
+
+
+class VerificationReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    threshold: float
+    results: list[DetectorVerifyResult] = Field(default_factory=list)
+    passes_all: bool = False
 
 
 class WindowScore(BaseModel):
@@ -75,6 +97,11 @@ class RunReport(BaseModel):
     locks: list[LockRecord] = Field(default_factory=list)
     flagged_count: int = 0
     rewrite_ratio: float = 0.0
+    meaning_gate: str = "lexical"
+    passed_verdict: bool = True
+    flagged: bool = False
+    hidden_removed: int = 0
+    verification: VerificationReport | None = None
 
     def to_public_dict(self) -> dict[str, float | str]:
         return {
