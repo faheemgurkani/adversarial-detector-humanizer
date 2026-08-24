@@ -34,14 +34,18 @@ class HumanizeRequest(BaseModel):
     device: str = Field(default="auto")
     models_dir: str | None = None
     target_score: float = Field(default=30.0, ge=0.0, le=100.0)
+    verdict_score: float = Field(default=45.0, ge=0.0, le=100.0)
     max_rounds: int = Field(default=5, ge=1, le=20)
     sentence_threshold: float = Field(default=50.0, ge=0.0, le=100.0)
     min_semantic_similarity: float = Field(default=0.88, ge=0.0, le=1.0)
     max_rewrite_ratio: float = Field(default=0.4, ge=0.0, le=1.0)
-    best_of_n: int = Field(default=2, ge=1, le=8)
+    best_of_n: int = Field(default=3, ge=1, le=8)
     rewriter_model: str | None = None
     semantic: str = Field(default="auto")
     allow_lexical_gate: bool = False
+    meaning_gate_mode: str = Field(default="auto")
+    verify: list[str] = Field(default_factory=list)
+    verify_threshold: float = Field(default=45.0, ge=0.0, le=100.0)
     compact: bool = False
 
 
