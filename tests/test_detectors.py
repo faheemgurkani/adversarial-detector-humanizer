@@ -37,10 +37,18 @@ def test_fake_detector_empty_raises() -> None:
 
 
 
-def test_ensemble_weights() -> None:
+def test_ensemble_max_default() -> None:
     low = FakeDetector(document_score=10.0)
     high = FakeDetector(document_score=90.0)
     ensemble = EnsembleDetector([low, high], weights=[1.0, 1.0])
+    result = ensemble.score("A normal sentence for blending.")
+    assert result.score == pytest.approx(90.0)
+
+
+def test_ensemble_mean_mode() -> None:
+    low = FakeDetector(document_score=10.0)
+    high = FakeDetector(document_score=90.0)
+    ensemble = EnsembleDetector([low, high], weights=[1.0, 1.0], aggregate="mean")
     result = ensemble.score("A normal sentence for blending.")
     assert result.score == pytest.approx(50.0)
     spans = ensemble.score_spans(["A normal sentence for blending."])
