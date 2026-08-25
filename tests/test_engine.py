@@ -13,7 +13,7 @@ class StripCueRewriter:
 
     name = "strip-cue"
 
-    def rewrite(self, sentence: str, *, n: int = 1) -> list[str]:
+    def rewrite(self, sentence: str, *, n: int = 1, history=None) -> list[str]:
         rewritten = sentence
         for cue in (
             "Furthermore, ",

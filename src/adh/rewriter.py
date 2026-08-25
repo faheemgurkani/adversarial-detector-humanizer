@@ -274,8 +274,12 @@ def rewrite_candidates_for(
     history: RewriteHistory | None = None,
 ) -> list[RewriteCandidate]:
     if hasattr(rewriter, "rewrite_candidates"):
-        return rewriter.rewrite_candidates(sentence, n=n, history=history)  # type: ignore[attr-defined]
-    return [
-        RewriteCandidate(text=text, mean_logprob=None)
-        for text in rewriter.rewrite(sentence, n=n, history=history)
-    ]
+        try:
+            return rewriter.rewrite_candidates(sentence, n=n, history=history)  # type: ignore[attr-defined]
+        except TypeError:
+            return rewriter.rewrite_candidates(sentence, n=n)  # type: ignore[attr-defined]
+    try:
+        texts = rewriter.rewrite(sentence, n=n, history=history)
+    except TypeError:
+        texts = rewriter.rewrite(sentence, n=n)
+    return [RewriteCandidate(text=text, mean_logprob=None) for text in texts]
