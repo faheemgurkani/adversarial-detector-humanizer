@@ -48,6 +48,7 @@ class SentenceReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     i: int
+    round: int = 1
     original: str
     rewritten: str
     score_before: float
@@ -134,6 +135,8 @@ class RunReport(BaseModel):
     hidden_removed: int = 0
     verification: VerificationReport | None = None
     detector_breakdown: DetectorBreakdown | None = None
+    prepass_applied: bool = False
+    prepass_paragraphs: int = 0
 
     def to_public_dict(self) -> dict[str, float | str]:
         return {
