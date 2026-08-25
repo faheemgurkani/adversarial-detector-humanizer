@@ -46,6 +46,11 @@ class HumanizeRequest(BaseModel):
     meaning_gate_mode: str = Field(default="auto")
     verify: list[str] = Field(default_factory=list)
     verify_threshold: float = Field(default=45.0, ge=0.0, le=100.0)
+    deploy_detectors: list[str] = Field(default_factory=list)
+    enable_logprob_blend: bool = True
+    logprob_blend_weight: float = Field(default=0.15, ge=0.0)
+    hard_mode: bool = False
+    hard_mode_max_sentences: int = Field(default=1, ge=0, le=5)
     compact: bool = False
 
 
