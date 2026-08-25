@@ -35,6 +35,15 @@ class LockRecord(BaseModel):
     ok: bool = True
 
 
+class CandidateScoreDebug(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    detector: float
+    logprob: float | None = None
+    blend: float
+
+
 class SentenceReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -48,6 +57,8 @@ class SentenceReport(BaseModel):
     end: int
     tells_after: int | None = None
     gate_vetoes: list[str] = Field(default_factory=list)
+    rewrite_mode: Literal["api", "hard", "none"] = "none"
+    candidate_scores: list[CandidateScoreDebug] = Field(default_factory=list)
 
 
 class DetectorVerifyResult(BaseModel):
@@ -68,6 +79,26 @@ class VerificationReport(BaseModel):
     threshold: float
     results: list[DetectorVerifyResult] = Field(default_factory=list)
     passes_all: bool = False
+
+
+class DetectorBreakdownEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    role: Literal["guidance", "deploy"]
+    score_before: float
+    score_after: float
+    label_before: str
+    label_after: str
+    delta: float
+
+
+class DetectorBreakdown(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    guidance: str
+    entries: list[DetectorBreakdownEntry] = Field(default_factory=list)
+    transfer_ok: bool | None = None
 
 
 class WindowScore(BaseModel):
@@ -102,6 +133,7 @@ class RunReport(BaseModel):
     flagged: bool = False
     hidden_removed: int = 0
     verification: VerificationReport | None = None
+    detector_breakdown: DetectorBreakdown | None = None
 
     def to_public_dict(self) -> dict[str, float | str]:
         return {
