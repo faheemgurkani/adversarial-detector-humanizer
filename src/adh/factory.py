@@ -7,6 +7,7 @@ from pathlib import Path
 from adh.detectors.base import Detector
 from adh.detectors.fake import FakeDetector
 from adh.detectors.local_raschka import LocalRaschkaDetector
+from adh.detectors.statistical import StatisticalDetector
 from adh.detectors.remote import (
     EnsembleDetector,
     GPTZeroDetector,
@@ -37,6 +38,16 @@ def load_detector(
         return EnsembleDetector([FakeDetector()], aggregate="max")
     if name == "ensemble-max":
         return EnsembleDetector([FakeDetector()], aggregate="max")
+    if name == "statistical":
+        return StatisticalDetector()
+    if name == "ensemble-local":
+        return EnsembleDetector(
+            [
+                LocalRaschkaDetector(DEFAULT_MODEL, models_dir=models_dir, device=device),
+                StatisticalDetector(),
+            ],
+            aggregate="max",
+        )
     if name == DEFAULT_MODEL or name in {
         "logreg",
         "distilbert",
