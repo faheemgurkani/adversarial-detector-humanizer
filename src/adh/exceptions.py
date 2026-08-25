@@ -31,3 +31,7 @@ class SemanticBackendError(AdhError, RuntimeError):
 
 class RewriterError(AdhError, RuntimeError):
     """The rewriter provider rejected the request or returned unusable text."""
+
+
+class HardModeUnavailableError(AdhError, RuntimeError):
+    """Token-guided hard mode requires GPU extras that are not installed."""
