@@ -144,6 +144,10 @@ def humanize_cmd(
     verify: Optional[str] = typer.Option(None, "--verify", help="Comma-separated pangram,gptzero."),
     verify_threshold: float = typer.Option(45.0, "--verify-threshold"),
     meaning_gate: str = typer.Option("auto", "--meaning-gate", help="auto, minilm, lexical, or full."),
+    deploy_detector: list[str] = typer.Option([], "--deploy-detector", help="Held-out deploy detector(s)."),
+    hard_mode: bool = typer.Option(False, "--hard-mode", help="Token-guided decode for stubborn sentences."),
+    hard_mode_max_sentences: int = typer.Option(1, "--hard-mode-max-sentences", min=0, max=5),
+    enable_logprob_blend: bool = typer.Option(True, "--logprob-blend/--no-logprob-blend"),
     rewriter_model: Optional[str] = typer.Option(None, "--rewriter-model"),
     semantic: str = typer.Option("auto", "--semantic", help="auto, minilm, or lexical."),
     allow_lexical: bool = typer.Option(
@@ -162,11 +166,17 @@ def humanize_cmd(
         gate = load_gate(prefer=semantic, allow_lexical=allow_lexical)
         rewriter = load_rewriter(model=rewriter_model)
         verify_detectors = [item.strip() for item in verify.split(",") if item.strip()] if verify else []
+        hard_rewriter = None
+        if hard_mode:
+            from adh.hard import HardModeRewriter
+
+            hard_rewriter = HardModeRewriter()
         report = humanize(
             payload,
             detector=loaded,
             rewriter=rewriter,
             semantic_gate=gate,
+            hard_rewriter=hard_rewriter,
             config=EngineConfig(
                 target_score=target,
                 verdict_score=verdict,
@@ -181,6 +191,10 @@ def humanize_cmd(
                 allow_lexical_gate=allow_lexical,
                 verify_detectors=verify_detectors,
                 verify_threshold=verify_threshold,
+                deploy_detectors=deploy_detector,
+                hard_mode=hard_mode,
+                hard_mode_max_sentences=hard_mode_max_sentences,
+                enable_logprob_blend=enable_logprob_blend,
             ),
         )
     except AdhError as error:
