@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
+from adh.audit import build_detector_breakdown
 from adh.detectors.base import Detector
 from adh.exceptions import InputError, PreserveLockError
+from adh.factory import load_detector
 from adh.gates.stack import MeaningGateStack
 from adh.preserve import extract_locks, lock_records, restore_locks, sentinels_preserved
-from adh.report import LockRecord, RunReport, SentenceReport, StopReason
-from adh.rewriter import Rewriter
+from adh.ranking import blend_score
+from adh.report import CandidateScoreDebug, LockRecord, RunReport, SentenceReport, StopReason
+from adh.rewriter import Rewriter, rewrite_candidates_for
 from adh.scrub import scrub_text
 from adh.semantic import SemanticGate
 from adh.sentences import SentenceSpan, reassemble, split_sentences
@@ -41,6 +46,14 @@ class EngineConfig(BaseModel):
     verify_detectors: list[str] = Field(default_factory=list)
     verify_threshold: float = Field(default=45.0, ge=0.0, le=100.0)
     verify_on_input: bool = True
+    deploy_detectors: list[str] = Field(default_factory=list)
+    run_detector_breakdown: bool = True
+    enable_logprob_blend: bool = True
+    logprob_blend_weight: float = Field(default=0.15, ge=0.0)
+    detector_blend_weight: float = Field(default=1.0, ge=0.0)
+    blend_epsilon: float = Field(default=2.0, ge=0.0, le=100.0)
+    hard_mode: bool = False
+    hard_mode_max_sentences: int = Field(default=1, ge=0, le=5)
 
 
 def _word_count(text: str) -> int:
@@ -62,6 +75,10 @@ def _build_gate_stack(config: EngineConfig, semantic_gate: SemanticGate | None) 
         strict_semantic_similarity=config.min_semantic_similarity,
         relaxed_semantic_similarity=config.relaxed_semantic_similarity,
     )
+
+
+def _load_deploy_detectors(names: list[str]) -> list[Detector]:
+    return [load_detector(name) for name in names]
 
 
 def _flag_indices(
@@ -90,16 +107,40 @@ def _flag_indices(
     return sorted(selected)
 
 
+def _try_hard_rewrite(
+    original: str,
+    *,
+    detector: Detector,
+    gate_stack: MeaningGateStack,
+    hard_rewriter,
+) -> tuple[str, float, bool] | None:
+    restored = hard_rewriter.rewrite_sentence(original, detector=detector, gate_stack=gate_stack)
+    if restored is None:
+        return None
+    after = detector.score(restored).score
+    return restored, after, True
+
+
 def _pick_candidate(
     original: str,
     *,
     rewriter: Rewriter,
     detector: Detector,
     gate_stack: MeaningGateStack,
-    best_of_n: int,
-    enable_tells_tiebreak: bool,
-    tells_epsilon: float,
-) -> tuple[str, float, float, list[LockRecord], bool, int | None, list[str]]:
+    settings: EngineConfig,
+    hard_rewriter=None,
+    hard_budget: int = 0,
+) -> tuple[
+    str,
+    float,
+    float,
+    list[LockRecord],
+    bool,
+    int | None,
+    list[str],
+    Literal["api", "hard", "none"],
+    list[CandidateScoreDebug],
+]:
     locked, lock = extract_locks(original)
     lock_meta = [
         LockRecord(id=identifier, text=text, ok=True)
@@ -111,13 +152,17 @@ def _pick_candidate(
     kept = False
     best_tells: int | None = None
     best_vetoes: list[str] = []
+    rewrite_mode: Literal["api", "hard", "none"] = "none"
+    debug_scores: list[CandidateScoreDebug] = []
+
     try:
-        candidates = rewriter.rewrite(locked, n=best_of_n)
+        candidates = rewrite_candidates_for(rewriter, locked, n=settings.best_of_n)
     except Exception:
         candidates = []
 
-    valid: list[tuple[str, float, int, list[LockRecord], float, list[str]]] = []
-    for raw in candidates:
+    valid: list[tuple[str, float, float, int, float, list[str]]] = []
+    for candidate in candidates:
+        raw = candidate.text
         if not sentinels_preserved(locked, raw):
             continue
         try:
@@ -127,22 +172,93 @@ def _pick_candidate(
         result = gate_stack.evaluate(original, restored)
         if not result.preserved:
             continue
-        score = detector.score(restored).score
-        tells = int(score_tells(restored)["tells"]) if enable_tells_tiebreak else 0
-        valid.append((restored, score, tells, lock_meta, result.similarity, result.vetoes))
+        detector_score = detector.score(restored).score
+        blended = blend_score(
+            detector_score=detector_score,
+            mean_logprob=candidate.mean_logprob,
+            source=original,
+            candidate=restored,
+            detector_blend_weight=settings.detector_blend_weight,
+            logprob_blend_weight=settings.logprob_blend_weight,
+            enable_logprob_blend=settings.enable_logprob_blend,
+        )
+        tells = int(score_tells(restored)["tells"]) if settings.enable_tells_tiebreak else 0
+        valid.append((restored, detector_score, blended, tells, result.similarity, result.vetoes))
+        debug_scores.append(
+            CandidateScoreDebug(
+                text=restored,
+                detector=detector_score,
+                logprob=candidate.mean_logprob,
+                blend=round(blended, 4),
+            )
+        )
 
     if valid:
-        best_score_value = min(item[1] for item in valid)
-        pool = [item for item in valid if item[1] <= best_score_value + tells_epsilon]
-        chosen = min(pool, key=lambda item: (item[2], item[1]))
-        best_text, best_score, best_tells, lock_meta, _similarity, best_vetoes = chosen
+        best_blend = min(item[2] for item in valid)
+        pool = [item for item in valid if item[2] <= best_blend + settings.blend_epsilon]
+        chosen = min(pool, key=lambda item: (item[3], item[2], item[1]))
+        best_text, best_score, _blend, best_tells, _similarity, best_vetoes = chosen
         kept = best_text != original
+        rewrite_mode = "api" if kept else "none"
         lock_meta = [
             LockRecord(id=identifier, text=text, ok=present)
             for identifier, text, present in lock_records(lock, best_text)
         ]
 
-    return best_text, before, best_score, lock_meta, kept, best_tells, best_vetoes
+    if not kept and settings.hard_mode and hard_budget > 0 and hard_rewriter is not None:
+        hard_result = _try_hard_rewrite(
+            original,
+            detector=detector,
+            gate_stack=gate_stack,
+            hard_rewriter=hard_rewriter,
+        )
+        if hard_result is not None:
+            best_text, best_score, kept = hard_result
+            rewrite_mode = "hard"
+            lock_meta = [
+                LockRecord(id=identifier, text=text, ok=present)
+                for identifier, text, present in lock_records(lock, best_text)
+            ]
+
+    return (
+        best_text,
+        before,
+        best_score,
+        lock_meta,
+        kept,
+        best_tells,
+        best_vetoes,
+        rewrite_mode,
+        debug_scores,
+    )
+
+
+def _attach_post_run_reports(
+    report: RunReport,
+    *,
+    settings: EngineConfig,
+    original_input: str,
+    guidance: Detector,
+) -> RunReport:
+    if settings.verify_detectors:
+        report.verification = run_verification(
+            input_text=original_input,
+            output_text=report.output_text,
+            detectors=settings.verify_detectors,
+            threshold=settings.verify_threshold,
+            verify_on_input=settings.verify_on_input,
+        )
+    if settings.deploy_detectors and settings.run_detector_breakdown:
+        deploy = _load_deploy_detectors(settings.deploy_detectors)
+        report.detector_breakdown = build_detector_breakdown(
+            original_input,
+            report.output_text,
+            guidance=guidance,
+            guidance_before=report.score_before,
+            guidance_after=report.score_after,
+            deploy=deploy,
+        )
+    return report
 
 
 def humanize(
@@ -153,6 +269,7 @@ def humanize(
     semantic_gate: SemanticGate | None = None,
     meaning_gate_stack: MeaningGateStack | None = None,
     config: EngineConfig | None = None,
+    hard_rewriter=None,
 ) -> RunReport:
     """Run the score → flag → lock → rewrite → gate → rescore loop."""
     if not isinstance(text, str) or not text.strip():
@@ -167,6 +284,7 @@ def humanize(
             raise InputError("text cannot be empty after scrub")
 
     gate_stack = meaning_gate_stack or _build_gate_stack(settings, semantic_gate)
+    hard_budget = settings.hard_mode_max_sentences if settings.hard_mode else 0
 
     spans = split_sentences(text)
     score_before = detector.score(text).score
@@ -202,15 +320,12 @@ def humanize(
             flagged=not passed_verdict,
             hidden_removed=hidden_removed,
         )
-        if settings.verify_detectors:
-            report.verification = run_verification(
-                input_text=original_input,
-                output_text=report.output_text,
-                detectors=settings.verify_detectors,
-                threshold=settings.verify_threshold,
-                verify_on_input=settings.verify_on_input,
-            )
-        return report
+        return _attach_post_run_reports(
+            report,
+            settings=settings,
+            original_input=original_input,
+            guidance=detector,
+        )
 
     for _round in range(settings.max_rounds):
         rounds += 1
@@ -238,15 +353,27 @@ def humanize(
         accepted = 0
         for index in flagged:
             span = spans[index]
-            rewritten, before, after, locks, kept, tells_after, vetoes = _pick_candidate(
+            (
+                rewritten,
+                before,
+                after,
+                locks,
+                kept,
+                tells_after,
+                vetoes,
+                rewrite_mode,
+                candidate_scores,
+            ) = _pick_candidate(
                 span.text,
                 rewriter=rewriter,
                 detector=detector,
                 gate_stack=gate_stack,
-                best_of_n=settings.best_of_n,
-                enable_tells_tiebreak=settings.enable_tells_tiebreak,
-                tells_epsilon=settings.tells_tiebreak_epsilon,
+                settings=settings,
+                hard_rewriter=hard_rewriter,
+                hard_budget=hard_budget,
             )
+            if rewrite_mode == "hard" and kept:
+                hard_budget -= 1
             lock_report.extend(locks)
             if kept:
                 replacements[index] = rewritten
@@ -263,6 +390,8 @@ def humanize(
                     end=span.end,
                     tells_after=tells_after,
                     gate_vetoes=vetoes,
+                    rewrite_mode=rewrite_mode,
+                    candidate_scores=candidate_scores,
                 )
             )
 
@@ -309,12 +438,9 @@ def humanize(
         flagged=not passed_verdict,
         hidden_removed=hidden_removed,
     )
-    if settings.verify_detectors:
-        report.verification = run_verification(
-            input_text=original_input,
-            output_text=report.output_text,
-            detectors=settings.verify_detectors,
-            threshold=settings.verify_threshold,
-            verify_on_input=settings.verify_on_input,
-        )
-    return report
+    return _attach_post_run_reports(
+        report,
+        settings=settings,
+        original_input=original_input,
+        guidance=detector,
+    )
