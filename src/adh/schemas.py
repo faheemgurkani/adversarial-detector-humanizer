@@ -51,6 +51,10 @@ class HumanizeRequest(BaseModel):
     logprob_blend_weight: float = Field(default=0.15, ge=0.0)
     hard_mode: bool = False
     hard_mode_max_sentences: int = Field(default=1, ge=0, le=5)
+    prepass: str = Field(default="none")
+    prepass_lang: str = Field(default="fi")
+    prepass_max_paragraphs: int = Field(default=2, ge=0, le=10)
+    prepass_backend: str = Field(default="llm")
     compact: bool = False
 
 

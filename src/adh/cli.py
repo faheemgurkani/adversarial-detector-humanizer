@@ -147,6 +147,10 @@ def humanize_cmd(
     deploy_detector: list[str] = typer.Option([], "--deploy-detector", help="Held-out deploy detector(s)."),
     hard_mode: bool = typer.Option(False, "--hard-mode", help="Token-guided decode for stubborn sentences."),
     hard_mode_max_sentences: int = typer.Option(1, "--hard-mode-max-sentences", min=0, max=5),
+    prepass: str = typer.Option("none", "--prepass", help="none or structural."),
+    prepass_lang: str = typer.Option("fi", "--prepass-lang"),
+    prepass_max_paragraphs: int = typer.Option(2, "--prepass-max-paragraphs", min=0, max=10),
+    prepass_backend: str = typer.Option("llm", "--prepass-backend", help="llm or google."),
     enable_logprob_blend: bool = typer.Option(True, "--logprob-blend/--no-logprob-blend"),
     rewriter_model: Optional[str] = typer.Option(None, "--rewriter-model"),
     semantic: str = typer.Option("auto", "--semantic", help="auto, minilm, or lexical."),
@@ -195,6 +199,10 @@ def humanize_cmd(
                 hard_mode=hard_mode,
                 hard_mode_max_sentences=hard_mode_max_sentences,
                 enable_logprob_blend=enable_logprob_blend,
+                prepass=prepass,  # type: ignore[arg-type]
+                prepass_lang=prepass_lang,
+                prepass_max_paragraphs=prepass_max_paragraphs,
+                prepass_backend=prepass_backend,
             ),
         )
     except AdhError as error:

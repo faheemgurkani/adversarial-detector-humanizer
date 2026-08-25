@@ -169,6 +169,10 @@ def create_app(
                     logprob_blend_weight=payload.logprob_blend_weight,
                     hard_mode=payload.hard_mode,
                     hard_mode_max_sentences=payload.hard_mode_max_sentences,
+                    prepass=payload.prepass,  # type: ignore[arg-type]
+                    prepass_lang=payload.prepass_lang,
+                    prepass_max_paragraphs=payload.prepass_max_paragraphs,
+                    prepass_backend=payload.prepass_backend,
                 ),
             )
         except AdhError as error:

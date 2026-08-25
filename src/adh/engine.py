@@ -54,6 +54,55 @@ class EngineConfig(BaseModel):
     blend_epsilon: float = Field(default=2.0, ge=0.0, le=100.0)
     hard_mode: bool = False
     hard_mode_max_sentences: int = Field(default=1, ge=0, le=5)
+    prepass: Literal["none", "structural"] = "none"
+    prepass_lang: str = "fi"
+    prepass_max_paragraphs: int = Field(default=2, ge=0, le=10)
+    prepass_backend: str = "llm"
+
+
+def _maybe_structural_prepass(
+    text: str,
+    *,
+    settings: EngineConfig,
+    detector: Detector,
+    gate_stack: MeaningGateStack,
+    translator=None,
+) -> tuple[str, bool, int]:
+    if settings.prepass != "structural" or settings.prepass_max_paragraphs == 0:
+        return text, False, 0
+
+    spans = split_sentences(text)
+    span_scores = [result.score for result in detector.score_spans([span.text for span in spans])]
+    flagged = _flag_indices(
+        spans,
+        span_scores,
+        threshold=settings.sentence_threshold,
+        top_k=settings.top_k_fallback,
+        max_rewrite_ratio=settings.max_rewrite_ratio,
+    )
+    if not flagged:
+        return text, False, 0
+
+    from adh.prepass import StructuralPrepass, load_translator
+
+    prepass = StructuralPrepass(
+        translator=translator or load_translator(settings.prepass_backend),
+        lang=settings.prepass_lang,
+        max_paragraphs=settings.prepass_max_paragraphs,
+    )
+    sentence_spans = [(span.start, span.end) for span in spans]
+    updated, changed, _reset = prepass.apply_document(
+        text,
+        flagged_sentence_indices=flagged,
+        sentence_spans=sentence_spans,
+        gate_stack=gate_stack,
+    )
+    if changed == 0:
+        return text, False, 0
+    doc_result = gate_stack.evaluate(text, updated)
+    if not doc_result.preserved:
+        return text, False, 0
+    return updated, True, changed
 
 
 def _word_count(text: str) -> int:
@@ -130,6 +179,7 @@ def _pick_candidate(
     settings: EngineConfig,
     hard_rewriter=None,
     hard_budget: int = 0,
+    history: list[tuple[str, str]] | None = None,
 ) -> tuple[
     str,
     float,
@@ -156,7 +206,12 @@ def _pick_candidate(
     debug_scores: list[CandidateScoreDebug] = []
 
     try:
-        candidates = rewrite_candidates_for(rewriter, locked, n=settings.best_of_n)
+        candidates = rewrite_candidates_for(
+            rewriter,
+            locked,
+            n=settings.best_of_n,
+            history=history,
+        )
     except Exception:
         candidates = []
 
@@ -270,6 +325,7 @@ def humanize(
     meaning_gate_stack: MeaningGateStack | None = None,
     config: EngineConfig | None = None,
     hard_rewriter=None,
+    prepass_translator=None,
 ) -> RunReport:
     """Run the score → flag → lock → rewrite → gate → rescore loop."""
     if not isinstance(text, str) or not text.strip():
@@ -285,6 +341,9 @@ def humanize(
 
     gate_stack = meaning_gate_stack or _build_gate_stack(settings, semantic_gate)
     hard_budget = settings.hard_mode_max_sentences if settings.hard_mode else 0
+    prepass_applied = False
+    prepass_paragraphs = 0
+    rewrite_history: dict[int, list[tuple[str, str]]] = {}
 
     spans = split_sentences(text)
     score_before = detector.score(text).score
@@ -319,6 +378,8 @@ def humanize(
             passed_verdict=passed_verdict,
             flagged=not passed_verdict,
             hidden_removed=hidden_removed,
+            prepass_applied=False,
+            prepass_paragraphs=0,
         )
         return _attach_post_run_reports(
             report,
@@ -326,6 +387,51 @@ def humanize(
             original_input=original_input,
             guidance=detector,
         )
+
+    text, prepass_applied, prepass_paragraphs = _maybe_structural_prepass(
+        text,
+        settings=settings,
+        detector=detector,
+        gate_stack=gate_stack,
+        translator=prepass_translator,
+    )
+    initial_score_before = score_before
+    current = text
+    if prepass_applied:
+        rewrite_history.clear()
+        current = text
+        best_text = text
+        current_score = detector.score(text).score
+        best_score = current_score
+        best_similarity = round(gate_stack.evaluate(original_input, text).similarity, 4)
+        if current_score <= settings.target_score:
+            passed_verdict = current_score <= settings.verdict_score
+            report = RunReport(
+                input_text=original_input,
+                output_text=text,
+                detector=detector.name,
+                score_before=initial_score_before,
+                score_after=current_score,
+                semantic_similarity=best_similarity,
+                rounds=0,
+                stop_reason="passed",
+                sentences=[],
+                locks=[],
+                flagged_count=0,
+                rewrite_ratio=0.0,
+                meaning_gate=gate_stack.name,
+                passed_verdict=passed_verdict,
+                flagged=not passed_verdict,
+                hidden_removed=hidden_removed,
+                prepass_applied=True,
+                prepass_paragraphs=prepass_paragraphs,
+            )
+            return _attach_post_run_reports(
+                report,
+                settings=settings,
+                original_input=original_input,
+                guidance=detector,
+            )
 
     for _round in range(settings.max_rounds):
         rounds += 1
@@ -353,6 +459,8 @@ def humanize(
         accepted = 0
         for index in flagged:
             span = spans[index]
+            prior = rewrite_history.get(index, [])
+            history = prior[-1:] if prior else None
             (
                 rewritten,
                 before,
@@ -371,6 +479,7 @@ def humanize(
                 settings=settings,
                 hard_rewriter=hard_rewriter,
                 hard_budget=hard_budget,
+                history=history,
             )
             if rewrite_mode == "hard" and kept:
                 hard_budget -= 1
@@ -378,9 +487,11 @@ def humanize(
             if kept:
                 replacements[index] = rewritten
                 accepted += 1
+                rewrite_history.setdefault(index, []).append((span.text, rewritten))
             round_reports.append(
                 SentenceReport(
                     i=index,
+                    round=rounds,
                     original=span.text,
                     rewritten=rewritten,
                     score_before=before,
@@ -424,7 +535,7 @@ def humanize(
         input_text=original_input,
         output_text=best_text,
         detector=detector.name,
-        score_before=score_before,
+        score_before=initial_score_before,
         score_after=best_score,
         semantic_similarity=round(best_similarity, 4),
         rounds=rounds,
@@ -437,6 +548,8 @@ def humanize(
         passed_verdict=passed_verdict,
         flagged=not passed_verdict,
         hidden_removed=hidden_removed,
+        prepass_applied=prepass_applied,
+        prepass_paragraphs=prepass_paragraphs,
     )
     return _attach_post_run_reports(
         report,
