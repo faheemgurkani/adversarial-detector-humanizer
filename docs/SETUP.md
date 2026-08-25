@@ -142,6 +142,21 @@ adh score --detector pangram --file out.txt
 adh score --detector gptzero --file out.txt
 ```
 
+Statistical + local neural ensemble (CPU statistical signal, no extra download):
+
+```bash
+adh score --detector statistical --text "Furthermore, it is important to note the result."
+adh humanize --detector ensemble-local --semantic lexical --allow-lexical-gate \
+  --text "Furthermore, it is important to note the result in 2024."
+```
+
+Optional structural translation pre-pass on flagged paragraphs only (higher latency):
+
+```bash
+adh humanize --detector fake --prepass structural --prepass-lang fi \
+  --semantic lexical --allow-lexical-gate --text "Your AI draft here."
+```
+
 Pipe input:
 
 ```bash

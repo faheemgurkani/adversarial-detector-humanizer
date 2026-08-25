@@ -37,6 +37,17 @@ See `benchmarks/samples.jsonl` (~5 hand-written rows). Extend with your own lice
 | `all_candidates_rejected` rate | Gates too strict? |
 | `passes_all` in verify block | External ground when keys available |
 
+## Statistical detector (`--detector statistical`)
+
+CPU-only heuristic from humanize-text (TTR, sentence-length CV, hapax ratio). It is a **weak proxy** with possible human FPR if used alone. Prefer the max ensemble preset:
+
+```bash
+adh score --detector ensemble-local --text "Your paragraph here."
+adh humanize --detector ensemble-local --file examples/sample.txt
+```
+
+`ensemble-local` = `qwen3-variable` + `statistical` with **max** aggregation, forcing the loop to optimize rhythm diversity as well as classifier score. Single-sentence span scores from `statistical` are neutral (50.0) because burstiness needs ≥2 sentences.
+
 ## Last smoke (fake detector)
 
 Run `python scripts/benchmark.py humanize --detector fake` and paste results here after local runs.
