@@ -164,6 +164,11 @@ def create_app(
                     allow_lexical_gate=payload.allow_lexical_gate,
                     verify_detectors=payload.verify,
                     verify_threshold=payload.verify_threshold,
+                    deploy_detectors=payload.deploy_detectors,
+                    enable_logprob_blend=payload.enable_logprob_blend,
+                    logprob_blend_weight=payload.logprob_blend_weight,
+                    hard_mode=payload.hard_mode,
+                    hard_mode_max_sentences=payload.hard_mode_max_sentences,
                 ),
             )
         except AdhError as error:
