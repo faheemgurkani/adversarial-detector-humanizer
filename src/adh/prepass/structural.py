@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from adh.exceptions import PreserveLockError
 from adh.gates.stack import MeaningGateStack
 from adh.prepass.translate import Translator, round_trip_translate
-from adh.preserve import PreserveLock, extract_locks, restore_locks, sentinels_preserved
+from adh.preserve import extract_locks, restore_locks, sentinels_preserved
 
 
 @dataclass(frozen=True)
@@ -129,7 +129,6 @@ class StructuralPrepass:
         current = text
         changed = 0
         reset_indices: set[int] = set()
-        offset_shift = 0
 
         for para_index in target_paragraphs:
             paragraphs = split_paragraphs(current)
