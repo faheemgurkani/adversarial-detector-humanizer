@@ -3,6 +3,7 @@ from __future__ import annotations
 from adh.engine import EngineConfig, humanize
 from adh.hard.guided_decode import pick_token_by_detector
 from adh.rewriter import ScriptedRewriter
+from tests.conftest import CueDetector
 
 
 def test_pick_token_by_detector_chooses_lowest_score() -> None:
