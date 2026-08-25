@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 import httpx
 
 from adh.exceptions import InputError, RewriterError
+from adh.ranking import mean_token_logprob
 
 REGISTER_SHIFT_SYSTEM_PROMPT = """You are a register-shift editor, not a synonym swapper.
 
@@ -27,12 +29,21 @@ template-like. Follow every rule:
 """
 
 
+@dataclass(frozen=True)
+class RewriteCandidate:
+    text: str
+    mean_logprob: float | None = None
+
+
 @runtime_checkable
 class Rewriter(Protocol):
     name: str
 
     def rewrite(self, sentence: str, *, n: int = 1) -> list[str]:
         """Return ``n`` candidate rewrites of ``sentence``."""
+
+    def rewrite_candidates(self, sentence: str, *, n: int = 1) -> list[RewriteCandidate]:
+        """Return candidates with optional mean token logprob when available."""
 
 
 class IdentityRewriter:
@@ -41,11 +52,14 @@ class IdentityRewriter:
     name = "identity"
 
     def rewrite(self, sentence: str, *, n: int = 1) -> list[str]:
+        return [candidate.text for candidate in self.rewrite_candidates(sentence, n=n)]
+
+    def rewrite_candidates(self, sentence: str, *, n: int = 1) -> list[RewriteCandidate]:
         if not sentence.strip():
             raise InputError("cannot rewrite empty sentence")
         if n < 1:
             raise InputError("n must be at least 1")
-        return [sentence] * n
+        return [RewriteCandidate(text=sentence, mean_logprob=-0.05)] * n
 
 
 class ScriptedRewriter:
@@ -53,10 +67,19 @@ class ScriptedRewriter:
 
     name = "scripted"
 
-    def __init__(self, mapping: dict[str, list[str]]) -> None:
+    def __init__(
+        self,
+        mapping: dict[str, list[str]],
+        *,
+        logprobs: dict[str, list[float | None]] | None = None,
+    ) -> None:
         self.mapping = {key.strip(): list(values) for key, values in mapping.items()}
+        self.logprobs = logprobs or {}
 
     def rewrite(self, sentence: str, *, n: int = 1) -> list[str]:
+        return [candidate.text for candidate in self.rewrite_candidates(sentence, n=n)]
+
+    def rewrite_candidates(self, sentence: str, *, n: int = 1) -> list[RewriteCandidate]:
         if n < 1:
             raise InputError("n must be at least 1")
         key = sentence.strip()
@@ -65,7 +88,13 @@ class ScriptedRewriter:
         candidates = self.mapping[key]
         if not candidates:
             raise RewriterError("scripted rewriter returned no candidates")
-        return (candidates * n)[:n]
+        probs = self.logprobs.get(key, [None] * len(candidates))
+        selected = (candidates * n)[:n]
+        selected_probs = (probs * n)[:n]
+        return [
+            RewriteCandidate(text=text, mean_logprob=prob)
+            for text, prob in zip(selected, selected_probs, strict=False)
+        ]
 
 
 class OpenAICompatibleRewriter:
@@ -80,6 +109,7 @@ class OpenAICompatibleRewriter:
         base_url: str | None = None,
         model: str | None = None,
         timeout: float = 60.0,
+        request_logprobs: bool = True,
     ) -> None:
         self.api_key = api_key if api_key is not None else os.environ.get("OPENAI_API_KEY", "")
         self.base_url = (
@@ -89,6 +119,7 @@ class OpenAICompatibleRewriter:
         ).rstrip("/")
         self.model = model or os.environ.get("ADH_REWRITER_MODEL") or "gpt-4o-mini"
         self.timeout = timeout
+        self.request_logprobs = request_logprobs
         if not self.api_key and "localhost" not in self.base_url and "127.0.0.1" not in self.base_url:
             raise RewriterError(
                 "OPENAI_API_KEY is not set. The engine will not fall back to "
@@ -97,6 +128,9 @@ class OpenAICompatibleRewriter:
             )
 
     def rewrite(self, sentence: str, *, n: int = 1) -> list[str]:
+        return [candidate.text for candidate in self.rewrite_candidates(sentence, n=n)]
+
+    def rewrite_candidates(self, sentence: str, *, n: int = 1) -> list[RewriteCandidate]:
         if not sentence.strip():
             raise InputError("cannot rewrite empty sentence")
         if n < 1:
@@ -115,6 +149,9 @@ class OpenAICompatibleRewriter:
                 {"role": "user", "content": sentence},
             ],
         }
+        if self.request_logprobs:
+            payload["logprobs"] = True
+            payload["top_logprobs"] = 0
         try:
             response = httpx.post(url, headers=headers, json=payload, timeout=self.timeout)
         except httpx.HTTPError as error:
@@ -128,15 +165,20 @@ class OpenAICompatibleRewriter:
         except json.JSONDecodeError as error:
             raise RewriterError("rewriter returned non-JSON") from error
         choices = body.get("choices") or []
-        texts: list[str] = []
+        candidates: list[RewriteCandidate] = []
         for choice in choices:
             message = choice.get("message") or {}
             content = (message.get("content") or "").strip()
             if content:
-                texts.append(_strip_wrapping_quotes(content))
-        if not texts:
+                candidates.append(
+                    RewriteCandidate(
+                        text=_strip_wrapping_quotes(content),
+                        mean_logprob=mean_token_logprob(choice),
+                    )
+                )
+        if not candidates:
             raise RewriterError("rewriter returned no usable candidates")
-        return texts[:n]
+        return candidates[:n]
 
 
 def _strip_wrapping_quotes(text: str) -> str:
