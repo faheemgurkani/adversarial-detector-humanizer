@@ -28,6 +28,8 @@ def test_openai_compatible_requires_key(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_openai_compatible_parses_choices(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+
     class _Response:
         status_code = 200
         text = "{}"
@@ -40,7 +42,8 @@ def test_openai_compatible_parses_choices(monkeypatch: pytest.MonkeyPatch) -> No
                 ]
             }
 
-    def fake_post(*_args, **_kwargs):
+    def fake_post(*_args, **kwargs):
+        captured["payload"] = kwargs.get("json") or {}
         return _Response()
 
     monkeypatch.setattr(httpx, "post", fake_post)
@@ -52,6 +55,38 @@ def test_openai_compatible_parses_choices(monkeypatch: pytest.MonkeyPatch) -> No
     texts = rewriter.rewrite("Original sentence.", n=2)
     assert texts[0] == "Rewritten sentence."
     assert texts[1] == "Second take."
+    messages = captured["payload"]["messages"]
+    assert messages[-1]["content"] == "Original sentence."
+
+
+def test_openai_compatible_round2_includes_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict = {}
+
+    class _Response:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Round two."}}]}
+
+    def fake_post(*_args, **kwargs):
+        captured["payload"] = kwargs.get("json") or {}
+        return _Response()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    rewriter = OpenAICompatibleRewriter(
+        api_key="test",
+        base_url="https://example.test/v1",
+        model="dummy",
+    )
+    rewriter.rewrite(
+        "Original sentence.",
+        history=[("Original sentence.", "First rewrite.")],
+    )
+    messages = captured["payload"]["messages"]
+    assert messages[1]["role"] == "user"
+    assert messages[2]["role"] == "assistant"
+    assert messages[2]["content"] == "First rewrite."
 
 
 def test_openai_compatible_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
