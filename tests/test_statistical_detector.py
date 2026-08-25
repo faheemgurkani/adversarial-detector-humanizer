@@ -9,7 +9,10 @@ from adh.factory import load_detector
 
 
 def test_uniform_sentences_score_high() -> None:
-    text = "Short line here. Short line there. Short line again."
+    text = (
+        "The result is clear. The result is clear. The result is clear. "
+        "The result is clear."
+    )
     assert ai_likeness_probability(text) > 0.5
     assert StatisticalDetector().score(text).score > 50.0
 
