@@ -33,6 +33,7 @@ See `benchmarks/samples.jsonl` (~5 hand-written rows). Extend with your own lice
 |--------|-----|
 | Human text FPR @ `verdict_score` | Calibrate reporting threshold |
 | Δ score after humanize | Primary product metric |
+| `detector_breakdown.transfer_ok` | Guidance vs deploy transfer (Plan 09) |
 | `all_candidates_rejected` rate | Gates too strict? |
 | `passes_all` in verify block | External ground when keys available |
 
