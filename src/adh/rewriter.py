@@ -5,12 +5,20 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Literal, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 import httpx
 
 from adh.exceptions import InputError, RewriterError
 from adh.ranking import mean_token_logprob
+
+RewriteHistory = list[tuple[str, str]]
+
+REGISTER_SHIFT_ROUND2_SUFFIX = """
+
+The user already received one rewrite. Do not revert prior improvements.
+Further reduce template-like phrasing while keeping meaning and locks exact.
+"""
 
 REGISTER_SHIFT_SYSTEM_PROMPT = """You are a register-shift editor, not a synonym swapper.
 
@@ -39,10 +47,22 @@ class RewriteCandidate:
 class Rewriter(Protocol):
     name: str
 
-    def rewrite(self, sentence: str, *, n: int = 1) -> list[str]:
+    def rewrite(
+        self,
+        sentence: str,
+        *,
+        n: int = 1,
+        history: RewriteHistory | None = None,
+    ) -> list[str]:
         """Return ``n`` candidate rewrites of ``sentence``."""
 
-    def rewrite_candidates(self, sentence: str, *, n: int = 1) -> list[RewriteCandidate]:
+    def rewrite_candidates(
+        self,
+        sentence: str,
+        *,
+        n: int = 1,
+        history: RewriteHistory | None = None,
+    ) -> list[RewriteCandidate]:
         """Return candidates with optional mean token logprob when available."""
 
 
@@ -51,10 +71,25 @@ class IdentityRewriter:
 
     name = "identity"
 
-    def rewrite(self, sentence: str, *, n: int = 1) -> list[str]:
-        return [candidate.text for candidate in self.rewrite_candidates(sentence, n=n)]
+    def rewrite(
+        self,
+        sentence: str,
+        *,
+        n: int = 1,
+        history: RewriteHistory | None = None,
+    ) -> list[str]:
+        return [
+            candidate.text
+            for candidate in self.rewrite_candidates(sentence, n=n, history=history)
+        ]
 
-    def rewrite_candidates(self, sentence: str, *, n: int = 1) -> list[RewriteCandidate]:
+    def rewrite_candidates(
+        self,
+        sentence: str,
+        *,
+        n: int = 1,
+        history: RewriteHistory | None = None,
+    ) -> list[RewriteCandidate]:
         if not sentence.strip():
             raise InputError("cannot rewrite empty sentence")
         if n < 1:
@@ -76,10 +111,25 @@ class ScriptedRewriter:
         self.mapping = {key.strip(): list(values) for key, values in mapping.items()}
         self.logprobs = logprobs or {}
 
-    def rewrite(self, sentence: str, *, n: int = 1) -> list[str]:
-        return [candidate.text for candidate in self.rewrite_candidates(sentence, n=n)]
+    def rewrite(
+        self,
+        sentence: str,
+        *,
+        n: int = 1,
+        history: RewriteHistory | None = None,
+    ) -> list[str]:
+        return [
+            candidate.text
+            for candidate in self.rewrite_candidates(sentence, n=n, history=history)
+        ]
 
-    def rewrite_candidates(self, sentence: str, *, n: int = 1) -> list[RewriteCandidate]:
+    def rewrite_candidates(
+        self,
+        sentence: str,
+        *,
+        n: int = 1,
+        history: RewriteHistory | None = None,
+    ) -> list[RewriteCandidate]:
         if n < 1:
             raise InputError("n must be at least 1")
         key = sentence.strip()
@@ -127,10 +177,25 @@ class OpenAICompatibleRewriter:
                 "OpenAI-compatible server if you do not want a cloud key."
             )
 
-    def rewrite(self, sentence: str, *, n: int = 1) -> list[str]:
-        return [candidate.text for candidate in self.rewrite_candidates(sentence, n=n)]
+    def rewrite(
+        self,
+        sentence: str,
+        *,
+        n: int = 1,
+        history: RewriteHistory | None = None,
+    ) -> list[str]:
+        return [
+            candidate.text
+            for candidate in self.rewrite_candidates(sentence, n=n, history=history)
+        ]
 
-    def rewrite_candidates(self, sentence: str, *, n: int = 1) -> list[RewriteCandidate]:
+    def rewrite_candidates(
+        self,
+        sentence: str,
+        *,
+        n: int = 1,
+        history: RewriteHistory | None = None,
+    ) -> list[RewriteCandidate]:
         if not sentence.strip():
             raise InputError("cannot rewrite empty sentence")
         if n < 1:
@@ -144,10 +209,7 @@ class OpenAICompatibleRewriter:
             "model": self.model,
             "temperature": 0.8,
             "n": n,
-            "messages": [
-                {"role": "system", "content": REGISTER_SHIFT_SYSTEM_PROMPT},
-                {"role": "user", "content": sentence},
-            ],
+            "messages": _build_chat_messages(sentence, history=history),
         }
         if self.request_logprobs:
             payload["logprobs"] = True
@@ -181,13 +243,39 @@ class OpenAICompatibleRewriter:
         return candidates[:n]
 
 
+def _build_chat_messages(
+    sentence: str,
+    *,
+    history: RewriteHistory | None = None,
+) -> list[dict[str, str]]:
+    system_prompt = REGISTER_SHIFT_SYSTEM_PROMPT
+    if history:
+        system_prompt += REGISTER_SHIFT_ROUND2_SUFFIX
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    if history:
+        for prior_in, prior_out in history:
+            messages.append({"role": "user", "content": prior_in})
+            messages.append({"role": "assistant", "content": prior_out})
+    messages.append({"role": "user", "content": sentence})
+    return messages
+
+
 def _strip_wrapping_quotes(text: str) -> str:
     if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
         return text[1:-1].strip()
     return text
 
 
-def rewrite_candidates_for(rewriter: Rewriter, sentence: str, *, n: int = 1) -> list[RewriteCandidate]:
+def rewrite_candidates_for(
+    rewriter: Rewriter,
+    sentence: str,
+    *,
+    n: int = 1,
+    history: RewriteHistory | None = None,
+) -> list[RewriteCandidate]:
     if hasattr(rewriter, "rewrite_candidates"):
-        return rewriter.rewrite_candidates(sentence, n=n)  # type: ignore[attr-defined]
-    return [RewriteCandidate(text=text, mean_logprob=None) for text in rewriter.rewrite(sentence, n=n)]
+        return rewriter.rewrite_candidates(sentence, n=n, history=history)  # type: ignore[attr-defined]
+    return [
+        RewriteCandidate(text=text, mean_logprob=None)
+        for text in rewriter.rewrite(sentence, n=n, history=history)
+    ]
