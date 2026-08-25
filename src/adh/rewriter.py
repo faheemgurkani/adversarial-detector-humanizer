@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 import httpx
 
@@ -185,3 +185,9 @@ def _strip_wrapping_quotes(text: str) -> str:
     if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
         return text[1:-1].strip()
     return text
+
+
+def rewrite_candidates_for(rewriter: Rewriter, sentence: str, *, n: int = 1) -> list[RewriteCandidate]:
+    if hasattr(rewriter, "rewrite_candidates"):
+        return rewriter.rewrite_candidates(sentence, n=n)  # type: ignore[attr-defined]
+    return [RewriteCandidate(text=text, mean_logprob=None) for text in rewriter.rewrite(sentence, n=n)]
