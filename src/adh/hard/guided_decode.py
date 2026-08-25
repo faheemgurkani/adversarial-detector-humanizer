@@ -5,8 +5,6 @@ from __future__ import annotations
 import os
 from typing import Callable
 
-import numpy as np
-
 from adh.exceptions import HardModeUnavailableError
 from adh.hard.adapters import DetectorScoreAdapter
 
@@ -38,7 +36,7 @@ def pick_token_by_detector(
         return token_ids[0]
     texts = [prefix_text + decode_token(token_id) for token_id in token_ids]
     scores = detector_scores(texts)
-    idx = int(np.argmin(scores))
+    idx = min(range(len(scores)), key=lambda index: scores[index])
     return token_ids[idx]
 
 
