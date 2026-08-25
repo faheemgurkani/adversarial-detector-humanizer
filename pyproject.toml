@@ -57,6 +57,10 @@ api = [
 full = [
   "spacy>=3.7",
 ]
+hard = [
+  "torch>=2.2",
+  "transformers>=4.44",
+]
 dev = [
   "fastapi>=0.115",
   "pytest>=8.3",
