@@ -9,14 +9,9 @@ from typing import Any
 from adh.models import DEFAULT_MODEL
 from adh.profiles import get_profile_preset
 
-_ADH_FIELD_NAMES = None
 
-
-def _adh_field_names() -> set[str]:
-    global _ADH_FIELD_NAMES
-    if _ADH_FIELD_NAMES is None:
-        _ADH_FIELD_NAMES = {item.name for item in fields(AdhConfig)}
-    return _ADH_FIELD_NAMES
+def _from_mapping(data: dict[str, Any]) -> AdhConfig:
+    allowed = {item.name for item in fields(AdhConfig)}
 
 
 @dataclass
@@ -53,7 +48,6 @@ class AdhConfig:
 
 
 def _from_mapping(data: dict[str, Any]) -> AdhConfig:
-    allowed = _adh_field_names()
     filtered = {key: value for key, value in data.items() if key in allowed}
     for key in ("verify_detectors", "deploy_detectors"):
         if key in filtered and filtered[key] is not None:
