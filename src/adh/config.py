@@ -10,10 +10,6 @@ from adh.models import DEFAULT_MODEL
 from adh.profiles import get_profile_preset
 
 
-def _from_mapping(data: dict[str, Any]) -> AdhConfig:
-    allowed = {item.name for item in fields(AdhConfig)}
-
-
 @dataclass
 class AdhConfig:
     """Caller-facing knobs shared by CLI, HTTP, and later doors."""
@@ -48,6 +44,7 @@ class AdhConfig:
 
 
 def _from_mapping(data: dict[str, Any]) -> AdhConfig:
+    allowed = {item.name for item in fields(AdhConfig)}
     filtered = {key: value for key, value in data.items() if key in allowed}
     for key in ("verify_detectors", "deploy_detectors"):
         if key in filtered and filtered[key] is not None:
