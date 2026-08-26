@@ -8,6 +8,13 @@ This is an **open-core engine and backend utility**, not a one-shot paraphraser.
 
 **Transformation plan (CLI + API + agents + Docker):** [docs/ROADMAP.md](docs/ROADMAP.md)
 
+**Try in 30 seconds** (no API key, no model download): [docs/SETUP.md](docs/SETUP.md#try-in-30-seconds)
+
+```bash
+python -m pip install -e ".[dev]"
+adh try
+```
+
 ## What it does
 
 ```
@@ -44,7 +51,7 @@ This product applies published techniques. It is not a paper.
 
 ## Setup (Python 3.11)
 
-Step-by-step extras, env vars, model fetch, API, and troubleshooting: **[docs/SETUP.md](docs/SETUP.md)**.
+Step-by-step extras, env vars, model fetch, API, and troubleshooting: **[docs/SETUP.md](docs/SETUP.md)**. Start with **[Try in 30 seconds](docs/SETUP.md#try-in-30-seconds)** (`adh try` / `--profile fast`) if you have no keys yet.
 
 ```bash
 git clone https://github.com/faheemgurkani/adversarial-detector-humanizer.git
@@ -71,13 +78,15 @@ Published weights live on the Hugging Face Hub under `rasbt/ai-text-detector-*` 
 
 ```bash
 adh --help
+adh try
 adh models list
 adh score --detector fake --text "Furthermore, it is important to note the result."
+adh humanize --profile fast --text "Furthermore, note this." --json
 adh humanize --detector ensemble-local --semantic lexical --allow-lexical-gate \
   --text "Furthermore, it is important to note the result in 2024."
 ```
 
-`humanize` requires an OpenAI-compatible rewriter (`OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL`). There is no regex humanizer fallback.
+`adh try` and `--profile fast` need no keys (fake detector + identity rewriter). A production humanize run requires an OpenAI-compatible rewriter (`OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL`). There is no regex humanizer fallback.
 
 Pipe or file input:
 
@@ -122,11 +131,23 @@ from adh.gates import build_meaning_gate_stack
 report = humanize(
     "Furthermore, the method is important to note in 2024.",
     detector=load_detector("fake"),
-    rewriter=load_rewriter(),
+    rewriter=load_rewriter(name="identity"),
     meaning_gate_stack=build_meaning_gate_stack(prefer="lexical", allow_lexical=True),
     config=EngineConfig(min_semantic_similarity=0.2),
 )
 print(report.to_public_dict())
+```
+
+Or call the shared service (same path as CLI and HTTP):
+
+```python
+from adh.service import run_humanize
+from adh.config import resolve_adh_config
+
+report = run_humanize(
+    "Furthermore, note this.",
+    config=resolve_adh_config(profile="fast"),
+)
 ```
 
 ## Tests

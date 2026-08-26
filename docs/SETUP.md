@@ -2,6 +2,23 @@
 
 This is the setup guide for the open-core CLI, library, and local HTTP API.
 
+## Try in 30 seconds
+
+No OpenAI key. No model downloads. The **`fast` profile** is test mode: fake detector, identity rewriter, lexical gates, one round.
+
+```bash
+python -m pip install -e ".[dev]"
+adh try
+```
+
+Or:
+
+```bash
+adh humanize --profile fast --text "Furthermore, note this." --json
+```
+
+Both work with an empty `.env`.
+
 **Product roadmap** (config file, Docker, MCP, agents): [ROADMAP.md](ROADMAP.md).
 
 Python **3.11** is the supported version for this repository. Python 3.12 usually works; 3.10 does not.
@@ -13,11 +30,12 @@ GPTZero and Pangram are **verification detectors**. Set their keys in `.env`, th
 | You want to… | Install extra | Also needed |
 |---|---|---|
 | Run tests / develop | `[dev]` | nothing else |
+| Try the loop in ~30 seconds | core or `[dev]` | nothing — `adh try` or `--profile fast` |
 | Score text with the fake detector | core or `[dev]` | nothing else |
-| Humanize text | core or `[dev]` | `.env` rewriter key **or** a local OpenAI-compatible server |
+| Humanize text (real rewriter) | core or `[dev]` | `.env` rewriter key **or** a local OpenAI-compatible server |
 | Score / humanize with a real local detector | `[local]` | `adh models fetch` |
 | Use MiniLM as the semantic gate | `[local]` | first MiniLM download happens on use |
-| Serve `POST /v1/humanize` | `[api]` or `[dev]` | rewriter key for humanize routes |
+| Serve `POST /v1/humanize` | `[api]` or `[dev]` | rewriter key for humanize routes, or `profile: fast` |
 
 `[pangram]` is listed in `pyproject.toml` for a later phase. Do not install it now.
 
@@ -94,7 +112,7 @@ Edit `.env` and set at least the rewriter values you will use. The CLI loads `.e
 
 Provider snippets are commented in `.env.example`.
 
-`adh score` with `--detector fake` does **not** need a rewriter key.
+`adh score` with `--detector fake` does **not** need a rewriter key. Neither does `adh try` / `adh humanize --profile fast`.
 
 ## 4. Download a local detector (optional)
 
@@ -116,6 +134,13 @@ adh score --detector distilbert --file examples/sample.txt
 If a named detector is not on disk, the CLI raises a not-ready error. Fetch it, or pass `--detector fake` while you are wiring the rewriter.
 
 ## 5. First commands
+
+Zero-key test mode (full loop shape, identity rewriter):
+
+```bash
+adh try
+adh humanize --profile fast --text "Furthermore, note this." --json
+```
 
 Score without models or API keys:
 
@@ -173,7 +198,7 @@ adh serve --host 127.0.0.1 --port 8000 --detector fake --semantic lexical
 
 Open `http://127.0.0.1:8000/docs`. Route contract: [BACKEND_PRD.md](BACKEND_PRD.md).
 
-Humanize routes still need the rewriter env vars.
+Humanize routes still need the rewriter env vars unless the request uses `"profile": "fast"`.
 
 ## 7. Tests
 
@@ -188,7 +213,7 @@ CI uses `FakeDetector` and a lexical gate. No GPU and no paid APIs.
 
 | Symptom | What to do |
 |---|---|
-| `OPENAI_API_KEY is not set` | Copy `.env.example` → `.env`, set a key, or point `OPENAI_BASE_URL` at a local server |
+| `OPENAI_API_KEY is not set` | Copy `.env.example` → `.env`, set a key, point `OPENAI_BASE_URL` at a local server, or use `adh try` / `--profile fast` |
 | Detector not ready | `adh models fetch --model <name>` after installing `[local]` |
 | MiniLM / semantic backend missing | `pip install -e ".[local]"` or pass `--semantic lexical --allow-lexical-gate` |
 | `adh: command not found` | Activate `.venv` and reinstall with `pip install -e ".[dev]"` |

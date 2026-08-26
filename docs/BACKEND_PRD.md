@@ -122,6 +122,7 @@ Closed loop: score → flag sentences → preserve-lock → register-shift rewri
 | Field | Type | Default |
 |-------|------|---------|
 | `text` | string | required |
+| `profile` | string or null | null (`fast` = zero-key test mode) |
 | `detector` | string | `qwen3-variable` |
 | `device` | string | `auto` |
 | `models_dir` | string or null | null |

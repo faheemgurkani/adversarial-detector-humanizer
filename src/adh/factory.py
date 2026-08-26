@@ -7,19 +7,27 @@ from pathlib import Path
 from adh.detectors.base import Detector
 from adh.detectors.fake import FakeDetector
 from adh.detectors.local_raschka import LocalRaschkaDetector
-from adh.detectors.statistical import StatisticalDetector
 from adh.detectors.remote import (
     EnsembleDetector,
     GPTZeroDetector,
     PangramDetector,
     assert_inner_loop_detector,
 )
+from adh.detectors.statistical import StatisticalDetector
 from adh.exceptions import InputError
-from adh.models import DEFAULT_MODEL
 from adh.gates import build_meaning_gate_stack
 from adh.gates.stack import MeaningGateStack
+from adh.models import DEFAULT_MODEL
 from adh.rewriter import IdentityRewriter, OpenAICompatibleRewriter, Rewriter
 from adh.semantic import SemanticGate, build_semantic_gate
+
+__all__ = [
+    "assert_inner_loop_detector",
+    "load_detector",
+    "load_gate",
+    "load_meaning_gate_stack",
+    "load_rewriter",
+]
 
 
 def load_detector(
@@ -43,7 +51,9 @@ def load_detector(
     if name == "ensemble-local":
         return EnsembleDetector(
             [
-                LocalRaschkaDetector(DEFAULT_MODEL, models_dir=models_dir, device=device),
+                LocalRaschkaDetector(
+                    DEFAULT_MODEL, models_dir=models_dir, device=device
+                ),
                 StatisticalDetector(),
             ],
             aggregate="max",

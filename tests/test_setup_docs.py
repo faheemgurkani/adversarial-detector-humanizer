@@ -28,6 +28,8 @@ def test_setup_doc_exists() -> None:
     assert "python3.11 -m venv .venv" in text
     assert "cp .env.example .env" in text
     assert "adh models fetch" in text
+    assert "Try in 30 seconds" in text
+    assert "adh try" in text
 
 
 def test_roadmap_doc_exists() -> None:

@@ -7,8 +7,9 @@ from typing import Any
 
 from adh.config import AdhConfig, resolve_adh_config
 from adh.detectors.base import Detector, ScoreResult
+from adh.detectors.remote import assert_inner_loop_detector
 from adh.engine import EngineConfig, humanize
-from adh.factory import assert_inner_loop_detector, load_detector, load_gate, load_rewriter
+from adh.factory import load_detector, load_gate, load_rewriter
 from adh.models import DEFAULT_MODEL
 from adh.report import RunReport
 from adh.rewriter import Rewriter
@@ -207,7 +208,9 @@ def run_humanize(
         detector_name,
         injected=detector,
         default_name=default_detector or detector_name,
-        models_dir=models_dir if models_dir is not None else (adh.models_dir if adh else None),
+        models_dir=(
+            models_dir if models_dir is not None else (adh.models_dir if adh else None)
+        ),
         device=device or (adh.device if adh else "auto"),
     )
     settings = settings.model_copy(update={"detector": loaded.name})

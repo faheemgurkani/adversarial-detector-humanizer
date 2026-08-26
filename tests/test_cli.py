@@ -12,6 +12,7 @@ def test_help() -> None:
     assert result.exit_code == 0
     assert "humanize" in result.stdout
     assert "score" in result.stdout
+    assert "try" in result.stdout
 
 
 def test_models_list() -> None:

@@ -26,7 +26,7 @@ input
 | Protocol | Methods | Implementations |
 |----------|---------|-----------------|
 | **Detector** | `score()`, `score_spans()` | Raschka local, fake, statistical, ensemble (max/mean), Pangram, GPTZero |
-| **Rewriter** | `rewrite()`, `rewrite_candidates()` | OpenAI-compatible, test helpers |
+| **Rewriter** | `rewrite()`, `rewrite_candidates()` | OpenAI-compatible, identity (`fast` profile), test helpers |
 | **SemanticGate** | similarity check | MiniLM, lexical |
 | **Translator** | `translate()` | LLM, Google (optional), identity (tests) |
 
@@ -63,10 +63,11 @@ The engine always returns a report with the best intermediate text.
 | Surface | Module | Calls |
 |---------|--------|-------|
 | Library | `adh.engine.humanize` | Engine directly |
-| CLI | `adh.cli` | Engine + factory |
-| HTTP | `adh.api` | Engine + factory |
+| Service | `adh.service` | factory + `engine.humanize` |
+| CLI | `adh.cli` | `service.run_humanize` / `run_score` |
+| HTTP | `adh.api` | `service.run_humanize` / `run_score` |
 
-**Target:** CLI and HTTP become thin wrappers over a pure core package — see [ROADMAP.md §3](ROADMAP.md#3-target-architecture).
+CLI and HTTP are thin doors: they parse input, call the service, and format output. Test mode is `--profile fast` / `adh try` (fake detector, identity rewriter, lexical gates). Full yaml config comes later — see [ROADMAP.md §3](ROADMAP.md#3-target-architecture).
 
 ## Environment
 

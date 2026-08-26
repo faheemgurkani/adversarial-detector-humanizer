@@ -348,9 +348,9 @@ Front-load naming contracts and package boundaries; they are painful to change a
 ### Per-step acceptance criteria
 
 **Step 0 — Test mode (Ollama-style day one)**
-- [ ] `adh humanize --profile fast --detector fake --text "…" --json` works with no `.env` keys
-- [ ] SETUP.md "Try in 30 seconds" section at top
-- [ ] `adh try` (or documented one-liner) prints scores + stop_reason
+- [x] `adh humanize --profile fast --detector fake --text "…" --json` works with no `.env` keys
+- [x] SETUP.md "Try in 30 seconds" section at top
+- [x] `adh try` (or documented one-liner) prints scores + stop_reason
 
 **Step 0b — IDs and errors (Stripe-style)**
 - [ ] `report_id` with `report_` prefix on every humanize response
@@ -359,8 +359,8 @@ Front-load naming contracts and package boundaries; they are painful to change a
 - [ ] Error code catalog started in BACKEND_PRD
 
 **Step 1 — Package boundary**
-- [ ] `adh.engine`, `adh.report`, `adh.gates`, `adh.preserve` import no `fastapi`, `typer`, `httpx` (rewriter adapters excepted behind protocols)
-- [ ] Single integration test: CLI and API produce identical `RunReport` for same config
+- [x] `adh.engine`, `adh.report`, `adh.gates`, `adh.preserve` import no `fastapi`, `typer`, `httpx` (rewriter adapters excepted behind protocols)
+- [x] Single integration test: CLI and API produce identical `RunReport` for same config
 
 **Step 2 — Registry**
 - [ ] All built-in detectors/rewriters registered via entry points
