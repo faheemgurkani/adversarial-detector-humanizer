@@ -18,7 +18,7 @@ from adh.exceptions import InputError
 from adh.models import DEFAULT_MODEL
 from adh.gates import build_meaning_gate_stack
 from adh.gates.stack import MeaningGateStack
-from adh.rewriter import OpenAICompatibleRewriter, Rewriter
+from adh.rewriter import IdentityRewriter, OpenAICompatibleRewriter, Rewriter
 from adh.semantic import SemanticGate, build_semantic_gate
 
 
@@ -63,8 +63,13 @@ def load_detector(
     raise InputError(f"unknown detector {name!r}")
 
 
-def load_rewriter(*, model: str | None = None) -> Rewriter:
-    return OpenAICompatibleRewriter(model=model)
+def load_rewriter(*, name: str | None = None, model: str | None = None) -> Rewriter:
+    backend = (name or "openai").strip().lower()
+    if backend == "identity":
+        return IdentityRewriter()
+    if backend in {"openai", "openai-compatible"}:
+        return OpenAICompatibleRewriter(model=model)
+    raise InputError(f"unknown rewriter {name!r}")
 
 
 def load_gate(*, prefer: str = "auto", allow_lexical: bool = False) -> SemanticGate:

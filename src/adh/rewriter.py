@@ -67,7 +67,7 @@ class Rewriter(Protocol):
 
 
 class IdentityRewriter:
-    """Test helper that returns the input unchanged."""
+    """Pass-through rewriter for tests and the zero-key ``fast`` profile."""
 
     name = "identity"
 

@@ -8,7 +8,6 @@ from typing import Any
 
 from adh import __version__
 from adh.detectors.base import Detector, ScoreResult
-from adh.engine import EngineConfig, humanize
 from adh.exceptions import (
     AdhError,
     DetectorNotReadyError,
@@ -19,7 +18,6 @@ from adh.exceptions import (
     RewriterError,
     SemanticBackendError,
 )
-from adh.factory import assert_inner_loop_detector, load_detector, load_gate, load_rewriter
 from adh.models import DEFAULT_MODEL, list_models
 from adh.report import RunReport
 from adh.rewriter import Rewriter
@@ -35,6 +33,7 @@ from adh.schemas import (
 )
 from adh.semantic import SemanticGate
 from adh.sentences import split_sentences
+from adh.service import run_humanize, run_score
 
 _STATUS = {
     InputError: 422,
@@ -91,27 +90,6 @@ def create_app(
     application.state.device = device
     application.state.models_dir = models_dir
 
-    def resolve_detector(name: str | None) -> Detector:
-        if application.state.detector is not None and (
-            name is None or name == application.state.detector.name
-        ):
-            return application.state.detector
-        return load_detector(
-            name or application.state.default_detector,
-            models_dir=application.state.models_dir,
-            device=application.state.device,
-        )
-
-    def resolve_rewriter(model: str | None) -> Rewriter:
-        if application.state.rewriter is not None:
-            return application.state.rewriter
-        return load_rewriter(model=model)
-
-    def resolve_gate(prefer: str, allow_lexical: bool) -> SemanticGate:
-        if application.state.semantic_gate is not None:
-            return application.state.semantic_gate
-        return load_gate(prefer=prefer, allow_lexical=allow_lexical)
-
     @application.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         bound = application.state.detector
@@ -122,11 +100,27 @@ def create_app(
     def models() -> dict:
         return {"models": list_models(application.state.models_dir)}
 
+    def _request_device(payload: ScoreRequest | HumanizeRequest) -> str:
+        if "device" in payload.model_fields_set:
+            return payload.device
+        return application.state.device
+
+    def _request_models_dir(payload: ScoreRequest | HumanizeRequest) -> Path | str | None:
+        if "models_dir" in payload.model_fields_set:
+            return payload.models_dir
+        return application.state.models_dir
+
     @application.post("/v1/score", response_model=ScoreResponse)
     def score_endpoint(payload: ScoreRequest) -> ScoreResponse:
         try:
-            loaded = resolve_detector(payload.detector)
-            result = loaded.score(payload.text)
+            loaded, result = run_score(
+                payload.text,
+                detector_name=payload.detector,
+                detector=application.state.detector,
+                device=_request_device(payload),
+                models_dir=_request_models_dir(payload),
+                default_detector=application.state.default_detector,
+            )
         except AdhError as error:
             raise HTTPException(status_code=_http_status(error), detail=str(error)) from error
         return ScoreResponse(
@@ -141,39 +135,15 @@ def create_app(
         payload: HumanizeRequest,
     ) -> RunReport | CompactHumanizeResponse:
         try:
-            assert_inner_loop_detector(payload.detector)
-            loaded = resolve_detector(payload.detector)
-            gate = resolve_gate(payload.semantic, payload.allow_lexical_gate)
-            writer = resolve_rewriter(payload.rewriter_model)
-            report = humanize(
+            report = run_humanize(
                 payload.text,
-                detector=loaded,
-                rewriter=writer,
-                semantic_gate=gate,
-                config=EngineConfig(
-                    target_score=payload.target_score,
-                    verdict_score=payload.verdict_score,
-                    max_rounds=payload.max_rounds,
-                    sentence_threshold=payload.sentence_threshold,
-                    min_semantic_similarity=payload.min_semantic_similarity,
-                    max_rewrite_ratio=payload.max_rewrite_ratio,
-                    best_of_n=payload.best_of_n,
-                    rewriter_model=payload.rewriter_model or "gpt-4o-mini",
-                    detector=loaded.name,
-                    meaning_gate_mode=payload.meaning_gate_mode,
-                    allow_lexical_gate=payload.allow_lexical_gate,
-                    verify_detectors=payload.verify,
-                    verify_threshold=payload.verify_threshold,
-                    deploy_detectors=payload.deploy_detectors,
-                    enable_logprob_blend=payload.enable_logprob_blend,
-                    logprob_blend_weight=payload.logprob_blend_weight,
-                    hard_mode=payload.hard_mode,
-                    hard_mode_max_sentences=payload.hard_mode_max_sentences,
-                    prepass=payload.prepass,  # type: ignore[arg-type]
-                    prepass_lang=payload.prepass_lang,
-                    prepass_max_paragraphs=payload.prepass_max_paragraphs,
-                    prepass_backend=payload.prepass_backend,
-                ),
+                config=payload,
+                detector=application.state.detector,
+                rewriter=application.state.rewriter,
+                semantic_gate=application.state.semantic_gate,
+                default_detector=application.state.default_detector,
+                device=_request_device(payload),
+                models_dir=_request_models_dir(payload),
             )
         except AdhError as error:
             raise HTTPException(status_code=_http_status(error), detail=str(error)) from error

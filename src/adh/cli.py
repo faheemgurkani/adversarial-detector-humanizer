@@ -12,11 +12,13 @@ from dotenv import find_dotenv, load_dotenv
 from rich.console import Console
 from rich.table import Table
 
-from adh.engine import EngineConfig, humanize
+from adh.config import resolve_adh_config
 from adh.exceptions import AdhError, InputError
-from adh.factory import assert_inner_loop_detector, load_detector, load_gate, load_rewriter
+from adh.factory import load_detector, load_gate
 from adh.models import DEFAULT_MODEL, fetch_models, list_models
+from adh.profiles import TRY_SAMPLE_TEXT
 from adh.report import score_to_label
+from adh.service import run_humanize, run_score
 
 load_dotenv(find_dotenv(usecwd=True))
 
@@ -29,6 +31,33 @@ models_app = typer.Typer(help="List and download published Raschka detector expo
 app.add_typer(models_app, name="models")
 console = Console()
 err_console = Console(stderr=True)
+
+_CLI_TO_ADH = {
+    "detector": "detector",
+    "device": "device",
+    "models_dir": "models_dir",
+    "target": "target_score",
+    "verdict": "verdict_score",
+    "max_rounds": "max_rounds",
+    "sentence_threshold": "sentence_threshold",
+    "min_semantic": "min_semantic_similarity",
+    "max_rewrite_ratio": "max_rewrite_ratio",
+    "best_of": "best_of_n",
+    "rewriter_model": "rewriter_model",
+    "semantic": "semantic",
+    "allow_lexical": "allow_lexical_gate",
+    "meaning_gate": "meaning_gate_mode",
+    "verify": "verify_detectors",
+    "verify_threshold": "verify_threshold",
+    "deploy_detector": "deploy_detectors",
+    "hard_mode": "hard_mode",
+    "hard_mode_max_sentences": "hard_mode_max_sentences",
+    "prepass": "prepass",
+    "prepass_lang": "prepass_lang",
+    "prepass_max_paragraphs": "prepass_max_paragraphs",
+    "prepass_backend": "prepass_backend",
+    "enable_logprob_blend": "enable_logprob_blend",
+}
 
 
 def _read_input(
@@ -54,6 +83,16 @@ def _fail(error: Exception) -> None:
     raise typer.Exit(code=1)
 
 
+def _option_from_command_line(ctx: typer.Context, name: str) -> bool:
+    getter = getattr(ctx, "get_parameter_source", None)
+    if getter is None:
+        return False
+    source = getter(name)
+    if source is None:
+        return False
+    return getattr(source, "name", str(source)) == "COMMANDLINE"
+
+
 @app.command()
 def score(
     text: Optional[str] = typer.Option(None, "--text", help="Text to score."),
@@ -66,8 +105,12 @@ def score(
     """Score text with a local detector. Does not rewrite."""
     try:
         payload = _read_input(text, file)
-        loaded = load_detector(detector, models_dir=models_dir, device=device)
-        result = loaded.score(payload)
+        loaded, result = run_score(
+            payload,
+            detector_name=detector,
+            device=device,
+            models_dir=models_dir,
+        )
     except AdhError as error:
         _fail(error)
         return
@@ -127,10 +170,30 @@ def serve(
     uvicorn.run(application, host=host, port=port, log_level="info")
 
 
+@app.command("try")
+def try_cmd() -> None:
+    """Run a sample humanize with the zero-key fast profile. No API key required."""
+    try:
+        report = run_humanize(
+            TRY_SAMPLE_TEXT,
+            config=resolve_adh_config(profile="fast"),
+        )
+    except AdhError as error:
+        _fail(error)
+        return
+    typer.echo(report.model_dump_json(indent=2))
+
+
 @app.command("humanize")
 def humanize_cmd(
+    ctx: typer.Context,
     text: Optional[str] = typer.Option(None, "--text", help="Text to humanize."),
     file: Optional[Path] = typer.Option(None, "--file", help="UTF-8 file to humanize."),
+    profile: Optional[str] = typer.Option(
+        None,
+        "--profile",
+        help="Preset bundle. Use 'fast' for zero-key test mode.",
+    ),
     detector: str = typer.Option(DEFAULT_MODEL, "--detector", help="Detector name."),
     device: str = typer.Option("auto", "--device"),
     models_dir: Optional[Path] = typer.Option(None, "--models-dir"),
@@ -165,45 +228,43 @@ def humanize_cmd(
     """Rewrite only flagged sentences until the detector score drops or rounds end."""
     try:
         payload = _read_input(text, file)
-        assert_inner_loop_detector(detector)
-        loaded = load_detector(detector, models_dir=models_dir, device=device)
-        gate = load_gate(prefer=semantic, allow_lexical=allow_lexical)
-        rewriter = load_rewriter(model=rewriter_model)
-        verify_detectors = [item.strip() for item in verify.split(",") if item.strip()] if verify else []
-        hard_rewriter = None
-        if hard_mode:
-            from adh.hard import HardModeRewriter
-
-            hard_rewriter = HardModeRewriter()
-        report = humanize(
+        verify_detectors = (
+            [item.strip() for item in verify.split(",") if item.strip()] if verify else []
+        )
+        values = {
+            "detector": detector,
+            "device": device,
+            "models_dir": models_dir,
+            "target_score": target,
+            "verdict_score": verdict,
+            "max_rounds": max_rounds,
+            "sentence_threshold": sentence_threshold,
+            "min_semantic_similarity": min_semantic,
+            "max_rewrite_ratio": max_rewrite_ratio,
+            "best_of_n": best_of,
+            "rewriter_model": rewriter_model,
+            "semantic": semantic,
+            "allow_lexical_gate": allow_lexical,
+            "meaning_gate_mode": meaning_gate,
+            "verify_detectors": verify_detectors,
+            "verify_threshold": verify_threshold,
+            "deploy_detectors": list(deploy_detector),
+            "hard_mode": hard_mode,
+            "hard_mode_max_sentences": hard_mode_max_sentences,
+            "prepass": prepass,
+            "prepass_lang": prepass_lang,
+            "prepass_max_paragraphs": prepass_max_paragraphs,
+            "prepass_backend": prepass_backend,
+            "enable_logprob_blend": enable_logprob_blend,
+        }
+        explicit = {
+            adh_name
+            for cli_name, adh_name in _CLI_TO_ADH.items()
+            if _option_from_command_line(ctx, cli_name)
+        }
+        report = run_humanize(
             payload,
-            detector=loaded,
-            rewriter=rewriter,
-            semantic_gate=gate,
-            hard_rewriter=hard_rewriter,
-            config=EngineConfig(
-                target_score=target,
-                verdict_score=verdict,
-                max_rounds=max_rounds,
-                sentence_threshold=sentence_threshold,
-                min_semantic_similarity=min_semantic,
-                max_rewrite_ratio=max_rewrite_ratio,
-                best_of_n=best_of,
-                rewriter_model=rewriter_model or "gpt-4o-mini",
-                detector=detector,
-                meaning_gate_mode=meaning_gate,
-                allow_lexical_gate=allow_lexical,
-                verify_detectors=verify_detectors,
-                verify_threshold=verify_threshold,
-                deploy_detectors=deploy_detector,
-                hard_mode=hard_mode,
-                hard_mode_max_sentences=hard_mode_max_sentences,
-                enable_logprob_blend=enable_logprob_blend,
-                prepass=prepass,  # type: ignore[arg-type]
-                prepass_lang=prepass_lang,
-                prepass_max_paragraphs=prepass_max_paragraphs,
-                prepass_backend=prepass_backend,
-            ),
+            config=resolve_adh_config(profile=profile, values=values, explicit=explicit),
         )
     except AdhError as error:
         _fail(error)

@@ -30,6 +30,10 @@ class HumanizeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(min_length=1)
+    profile: str | None = Field(
+        default=None,
+        description="Preset bundle. Use 'fast' for zero-key test mode.",
+    )
     detector: str = Field(default=DEFAULT_MODEL)
     device: str = Field(default="auto")
     models_dir: str | None = None
