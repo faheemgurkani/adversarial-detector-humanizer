@@ -36,3 +36,4 @@ def test_roadmap_doc_exists() -> None:
     text = path.read_text(encoding="utf-8")
     assert "adh.yaml" in text
     assert "entry_points" in text
+    assert "Interface discipline" in text

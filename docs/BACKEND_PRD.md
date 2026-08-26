@@ -4,7 +4,7 @@ Open-core HTTP and library contract for `adversarial-detector-humanizer`.
 
 The ASGI app in `src/adh/api.py` is a thin wrapper around `adh.engine.humanize`. A later hosted SaaS must keep calling this engine. It must not reimplement the loop in another language.
 
-**Planned product changes** (async jobs, config file, MCP): [ROADMAP.md](ROADMAP.md). This document describes the **current** `/v1` contract; additive fields are preferred over breaking changes.
+**Planned product changes** (async jobs, config file, MCP, prefixed IDs, idempotency, Stripe/Ollama interface discipline): [ROADMAP.md](ROADMAP.md). This document describes the **current** `/v1` contract; additive fields are preferred over breaking changes.
 
 Positioning: **verified score reduction**. Local detector scores are proxies. This API does not guarantee a Pangram, GPTZero, or Turnitin pass.
 

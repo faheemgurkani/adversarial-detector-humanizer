@@ -96,6 +96,47 @@ Reference clones for research live under `docs/resources/` (gitignored). See [re
 
 ---
 
+## 4a. Interface discipline (Stripe + Ollama)
+
+Two proven products, different domains, same pattern: **the engine matters less than a stable interface and a painless day one.**
+
+### From Stripe — API-as-product
+
+Treat API design, errors, and docs as the product — not an add-on.
+
+| Habit | ADH application |
+|-------|-----------------|
+| **Prefixed resource IDs** | `job_a1b2…`, `report_x9y8…`, `req_…` on every job, run report, and request — add **before** external users exist |
+| **Idempotency on mutating calls** | `Idempotency-Key` header (or body field) on `POST /v1/humanize` and `POST /v1/jobs/humanize` — retries must not run the loop twice |
+| **Actionable errors** | Structured body: `code`, `message`, `retryable`, `doc_url`, `request_id` — never a bare string |
+| **`metadata` on every object** | Optional `metadata: dict[str, string]` on jobs and compact reports — future-proofs v1 without schema breaks |
+| **Consistency is the product** | Mandatory **API review gate** before any change to field names, `stop_reason` values, or config keys across CLI + HTTP + MCP |
+| **Safe sandbox** | Profile `fast` + `fake` detector = **test mode**: zero OpenAI key, zero cost, full loop shape — try the product in ~30 seconds |
+
+### From Ollama — frictionless install, familiar shapes
+
+**Make the first five minutes frictionless** even if the engine is complex.
+
+| Habit | ADH application |
+|-------|-----------------|
+| **One command install, one command run** | `pip install …` → `adh humanize --profile fast --detector fake --text "…"` (no keys) |
+| **Don't invent vocabulary if one exists** | Job polling mirrors familiar async patterns (202 + poll 200 with status body, like Stripe/Pangram); compact response uses **`input` / `output` aliases** alongside existing fields where non-breaking |
+| **Drop-in mental model** | Point existing HTTP clients at `adh serve` with minimal field mapping; optional OpenAI-compatible **rewriter** base URL is separate from ADH's own API shape |
+| **Local-first default** | Works offline for score/humanize with `fake` + lexical gate — cloud keys are an upgrade path, not a gate |
+
+### API review gate (process)
+
+Before shipping any change to public contract:
+
+1. Same field name in CLI JSON, HTTP body, MCP tool schema, and `adh.yaml`
+2. Additive-only in `/v1` unless explicitly versioning to `/v2`
+3. Update [BACKEND_PRD.md](BACKEND_PRD.md) + error catalog in same PR
+4. Changelog entry for integrators
+
+**Common thread:** integrators trust that names won't shift under them, and day one doesn't require hunting keys.
+
+---
+
 ## 5. Unified config (`adh.yaml`)
 
 Soup-style: `adh init` writes a default file; CLI and server read it.
@@ -130,12 +171,12 @@ deploy_detectors: []         # post-run breakdown
 
 ### Profiles (preset bundles)
 
-| Profile | Detector | Rounds | Prepass | Verify | Use case |
-|---------|----------|--------|---------|--------|----------|
-| `fast` | `fake` or `distilbert` | 1 | none | no | CI smoke, quick pass |
-| `standard` | `qwen3-variable` | 3–5 | none | optional | Default local use |
-| `quality` | `ensemble-local` | 5 | structural optional | optional | Best local proxy |
-| `verify-only` | `qwen3-variable` | 0 | none | yes | Score + Pangram, no rewrite |
+| Profile | Detector | Rounds | Prepass | Verify | Keys needed | Use case |
+|---------|----------|--------|---------|--------|-------------|----------|
+| `fast` | `fake` | 1 | none | no | **none** | **Test mode / sandbox** — try full flow in ~30s |
+| `standard` | `qwen3-variable` | 3–5 | none | optional | rewriter + optional local models | Default local use |
+| `quality` | `ensemble-local` | 5 | structural optional | optional | rewriter + local models | Best local proxy |
+| `verify-only` | `qwen3-variable` | 0 | none | yes | verify API keys | Score + Pangram, no rewrite |
 
 CLI/API/MCP accept **`text` + `profile` + optional overrides** (`target_score`, `detector`) — not the full `EngineConfig` surface unless `advanced: true`.
 
@@ -184,6 +225,30 @@ def load_plugin(group: str, name: str):
 - `POST /v1/humanize` — blocks until done
 - **`compact: true` becomes default for agent clients** (full `RunReport` on `compact: false`)
 - Add **`agent_hint`** string derived from `stop_reason` (additive field, non-breaking)
+- Add **`report_id`** prefix (`report_…`) on every response
+- Add optional **`metadata`** map (string keys/values, max 50 pairs) on request and echoed on response
+- **`Idempotency-Key`** header: same key + same body within 24h returns cached `report_id` / result (no double humanize)
+- **Familiar aliases** (non-breaking): compact body may include `input` (= source text hash or truncated input) and `output` (= `output_text`) for OpenAI-style client mental models
+
+### 7.1b Error envelope (Stripe-style)
+
+All HTTP errors use one shape:
+
+```json
+{
+  "error": {
+    "code": "rewriter_unavailable",
+    "message": "OPENAI_API_KEY is not set",
+    "retryable": false,
+    "doc_url": "https://github.com/.../docs/SETUP.md#rewriter",
+    "request_id": "req_abc123"
+  }
+}
+```
+
+Every response includes `X-Request-Id: req_…` (or `request_id` in JSON body). CLI `--json` errors use the same `code` values.
+
+**Error code catalog** lives in BACKEND_PRD (maintained with API review gate).
 
 ### 7.2 Async jobs (Phase 6)
 
@@ -193,22 +258,30 @@ Long documents and agent timeouts require job-based execution:
 POST /v1/jobs/humanize
   → 202 Accepted
   → Location: /v1/jobs/{job_id}
-  → Body: { "job_id": "...", "status": "pending" }
+  → Body: { "job_id": "job_…", "status": "pending", "metadata": {} }
 
 GET /v1/jobs/{job_id}
-  → 200 OK always (while polling)
-  → Body: { "job_id", "status", "report"?, "error"? }
+  → 200 OK always (while polling — not 202 on poll)
+  → Body: { "job_id", "status", "report_id"?, "report"?, "error"?, "metadata"? }
 ```
 
-**Job status enum:** `pending` → `processing` → `done` | `failed`
+**Job IDs:** always prefixed `job_`. Completed runs link to `report_id` (`report_…`).
+
+**Idempotency:** same `Idempotency-Key` on job create returns existing `job_id` if still valid.
+
+**Job status enum:** `pending` → `processing` → `done` | `failed` (mirror common async API vocabulary; document mapping in BACKEND_PRD)
 
 **Structured error on failed:**
 
 ```json
 {
-  "code": "rewriter_unavailable",
-  "message": "OPENAI_API_KEY is not set",
-  "retryable": false
+  "error": {
+    "code": "rewriter_unavailable",
+    "message": "OPENAI_API_KEY is not set",
+    "retryable": false,
+    "doc_url": "https://github.com/.../docs/SETUP.md#rewriter",
+    "request_id": "req_abc123"
+  }
 }
 ```
 
@@ -233,12 +306,15 @@ Expose **small, honest tools** — not chat prose.
 
 ```json
 {
+  "report_id": "report_abc123",
   "output_text": "...",
+  "output": "...",
   "ai_score_before": 78,
   "ai_score_after": 32,
   "stop_reason": "passed",
   "passed_verdict": true,
-  "agent_hint": "Local score reached target. Run adh_verify if user asked about Pangram."
+  "agent_hint": "Local score reached target. Run adh_verify if user asked about Pangram.",
+  "metadata": {}
 }
 ```
 
@@ -257,17 +333,30 @@ Front-load naming contracts and package boundaries; they are painful to change a
 
 | Step | Deliverable | Why now |
 |------|-------------|---------|
+| **0** | **Test mode path** — document + default `fast`/`fake` zero-key flow; `adh try` one-liner | Ollama-style day one (~30s) |
+| **0b** | **Prefixed IDs + error envelope** — `report_id`, `req_…`, structured `error` object spec in BACKEND_PRD | Stripe discipline; painful to add later |
 | **1** | Package boundary: pure engine vs CLI/API imports | Prevents drift before more surface area |
 | **2** | `entry_points` registry (`importlib.metadata`) | Lock `adh.detectors` / `adh.rewriters` group names |
-| **3** | `adh.yaml` + `adh init` + profiles | Same config for CLI, server, agents |
+| **3** | `adh.yaml` + `adh init` + profiles (incl. test mode) | Same config for CLI, server, agents |
 | **4** | `adh doctor` | Trust + pre-flight before integrations |
-| **5** | Freeze sync `/v1/humanize`; `compact` default for agents; `agent_hint` | Stable contract |
-| **6** | Async jobs (`POST/GET /v1/jobs/*`, structured errors, `job_id`) | Long docs, real deployments |
+| **5** | Freeze sync `/v1/humanize`; `compact` default; `agent_hint`; `metadata`; idempotency | Stable contract + API review gate |
+| **6** | Async jobs (`job_…` IDs, idempotency, poll 200 + status, structured errors) | Long docs, real deployments |
 | **7** | Docker image + compose | One-command team deploy |
 | **8** | MCP server (`adh mcp serve`) | Cursor / Claude Code workflows |
 | **9** | Python SDK + n8n/LangChain examples | Easiest once 1–6 stable |
 
 ### Per-step acceptance criteria
+
+**Step 0 — Test mode (Ollama-style day one)**
+- [ ] `adh humanize --profile fast --detector fake --text "…" --json` works with no `.env` keys
+- [ ] SETUP.md "Try in 30 seconds" section at top
+- [ ] `adh try` (or documented one-liner) prints scores + stop_reason
+
+**Step 0b — IDs and errors (Stripe-style)**
+- [ ] `report_id` with `report_` prefix on every humanize response
+- [ ] `X-Request-Id` / `req_` on all HTTP responses
+- [ ] Error envelope: `code`, `message`, `retryable`, `doc_url`, `request_id`
+- [ ] Error code catalog started in BACKEND_PRD
 
 **Step 1 — Package boundary**
 - [ ] `adh.engine`, `adh.report`, `adh.gates`, `adh.preserve` import no `fastapi`, `typer`, `httpx` (rewriter adapters excepted behind protocols)
@@ -290,13 +379,17 @@ Front-load naming contracts and package boundaries; they are painful to change a
 
 **Step 5 — Sync API polish**
 - [ ] `agent_hint` on compact response
-- [ ] OpenAPI documents all `stop_reason` values
+- [ ] Optional `metadata` on request/response
+- [ ] `Idempotency-Key` deduplicates humanize within TTL
+- [ ] OpenAPI documents all `stop_reason` values + error codes
+- [ ] API review checklist in CONTRIBUTING or ROADMAP §4a
 - [ ] BACKEND_PRD updated; semver policy written
 
 **Step 6 — Async jobs**
-- [ ] 202 on create; 200 + status body on poll
-- [ ] `job_id` consistent in CLI JSON, HTTP, webhooks, docs
-- [ ] Failed jobs return structured `error` object
+- [ ] 202 on create; 200 + status body on poll (not 202 on GET)
+- [ ] `job_id` prefixed `job_`; links to `report_id`
+- [ ] Idempotency on job create
+- [ ] Failed jobs use same structured `error` envelope as sync routes
 
 **Step 7 — Docker**
 - [ ] `Dockerfile` with `[api,local]` optional GPU variant
@@ -368,12 +461,13 @@ Removed: per-feature `future_work_plans/` shards and separate `PRODUCT.md` (merg
 
 The utility is “product-ready” (open-core) when a new user can:
 
-1. `pip install adversarial-detector-humanizer[local,api]`
-2. `adh init && adh doctor` → all green
-3. `adh humanize --profile standard --file draft.txt --json`
-4. `docker compose up` → `curl POST /v1/humanize` with `compact: true`
-5. Plug an MCP client into `adh mcp serve` and humanize a paragraph
-6. Read one doc ([BACKEND_PRD.md](BACKEND_PRD.md)) for integration contract
+1. `pip install adversarial-detector-humanizer[dev]` (minimal extras)
+2. **`adh humanize --profile fast --detector fake --text "Hello world." --json`** — no keys, ~30 seconds (test mode)
+3. `adh init && adh doctor` → all green before production profile
+4. `adh humanize --profile standard --file draft.txt --json` (with rewriter key)
+5. `docker compose up` → `curl POST /v1/humanize` with `Idempotency-Key` and `compact: true`
+6. Plug an MCP client into `adh mcp serve` and humanize a paragraph
+7. Read [BACKEND_PRD.md](BACKEND_PRD.md) for contract, error codes, and `stop_reason` values
 
 Without cloning the repo, reading twenty flags, or guessing env vars.
 
@@ -382,5 +476,7 @@ Without cloning the repo, reading twenty flags, or guessing env vars.
 ## 15. References
 
 - [Soup CLI](https://trysoup.dev/) — config file, profiles, MCP, backend-first product shape
+- [Stripe API design](https://stripe.com/docs/api) — idempotency, prefixed IDs, actionable errors, metadata, API review discipline
+- [Ollama](https://ollama.com/) — one-command install/run, familiar API shapes, local-first sandbox
 - [Pangram API](https://docs.pangram.com/api-reference/introduction) — async task polling pattern
 - Research basis in root [README.md](../README.md)
