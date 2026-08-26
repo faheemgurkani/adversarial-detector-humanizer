@@ -37,3 +37,4 @@ def test_roadmap_doc_exists() -> None:
     assert "adh.yaml" in text
     assert "entry_points" in text
     assert "Interface discipline" in text
+    assert "Implementation playbook" in text

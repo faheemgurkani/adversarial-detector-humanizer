@@ -473,7 +473,379 @@ Without cloning the repo, reading twenty flags, or guessing env vars.
 
 ---
 
-## 15. References
+## 15. Implementation playbook (file-level)
+
+Concrete **how / when / where** for each build step, mapped to the **current** tree under `src/adh/`. Each step lists new files, edits, dependencies, and **test cases** (file + function names to add).
+
+**Current duplication to eliminate:** `cli.py` lines 178–207 and `api.py` lines 148–177 both hand-build `EngineConfig` and call `humanize()` — that wiring moves to a shared service layer in Step 1.
+
+```
+src/adh/
+├── engine.py          ← keep pure; no new imports from cli/api
+├── factory.py         ← Step 2: thin wrapper over registry
+├── cli.py             ← doors: score, humanize, serve, init, doctor, try, mcp
+├── api.py             ← doors: /v1/*, middleware, job routes
+├── schemas.py         ← HTTP DTOs + error envelope
+├── report.py          ← RunReport + report_id generation
+├── exceptions.py      ← add .code on each AdhError subclass
+├── service.py         ← NEW Step 1: run_humanize(), run_score()
+├── registry.py        ← NEW Step 2: load_plugin(), list_plugins()
+├── config.py          ← NEW Step 3: AdhConfig, load_yaml(), merge_profile()
+├── profiles.py        ← NEW Step 3: PROFILE_PRESETS dict
+├── ids.py             ← NEW Step 0b: new_report_id(), new_job_id(), new_request_id()
+├── errors.py          ← NEW Step 0b: error_response(), ERROR_CODES
+├── idempotency.py     ← NEW Step 5: IdempotencyStore (memory/SQLite)
+├── jobs/              ← NEW Step 6: store.py, worker.py, routes in api.py
+└── mcp_server.py      ← NEW Step 8
+```
+
+---
+
+### Step 0 — Test mode (zero-key day one)
+
+**Goal:** A new developer runs the full humanize loop in ~30s with no `.env` keys.
+
+**When:** First — no dependencies on other steps except optionally registering `identity` rewriter (can ship in Step 0 or 2).
+
+**Why blocked today:** `load_rewriter()` in `factory.py:66–67` always returns `OpenAICompatibleRewriter`, which reads `OPENAI_API_KEY` (`rewriter.py`). `tests/test_cli.py::test_humanize_without_key_fails` documents this failure.
+
+| Where | How |
+|-------|-----|
+| **`src/adh/profiles.py`** (new) | Define `PROFILE_PRESETS["fast"]`: `detector="fake"`, `rewriter="identity"`, `max_rounds=1`, `allow_lexical_gate=True`, `semantic="lexical"`, `meaning_gate_mode="lexical"`. |
+| **`src/adh/factory.py`** | Add branch or (later) registry entry: `load_rewriter(name="identity")` → `IdentityRewriter` from `rewriter.py:69`. |
+| **`src/adh/cli.py`** | Add `--profile` option to `humanize_cmd` (default `None`; `--profile fast` applies preset before flags). Add `try` command: one-liner that humanizes sample text with `fast` profile and prints compact JSON. |
+| **`docs/SETUP.md`** | Top section “Try in 30 seconds” with `pip install -e ".[dev]"` + `adh try`. |
+| **`README.md`** | Link to SETUP try section. |
+
+**Test cases** — add `tests/test_test_mode.py`:
+
+| Test | Assert |
+|------|--------|
+| `test_fast_profile_no_openai_key` | `CliRunner` + `monkeypatch.delenv("OPENAI_API_KEY")`; `adh humanize --profile fast --text "Furthermore, note this." --json` → exit 0, valid JSON with `stop_reason`. |
+| `test_try_command_exits_zero` | `adh try` → exit 0, stdout contains `stop_reason` and `output_text`. |
+| `test_fast_profile_uses_fake_detector` | Parse JSON; `detector == "fake"`. |
+| `test_profile_overridden_by_explicit_flag` | `--profile fast --detector statistical` → report/detector name is `statistical` (when local extras installed) or skip with `@pytest.mark.skipif`. |
+| `test_fast_api_humanize_no_key` | `TestClient` with injected `IdentityRewriter`; `POST /v1/humanize` body `{"text":"…","detector":"fake","compact":true}` + profile field once Step 3 adds it → 200. |
+
+**Regression:** Keep `test_humanize_without_key_fails` for **non-fast** profile (default still requires key until profile or `--rewriter identity` is explicit).
+
+---
+
+### Step 0b — Prefixed IDs + structured errors
+
+**Goal:** Logs, support, and clients can correlate requests; errors are actionable (Stripe-style).
+
+**When:** Immediately after Step 0 (or in parallel); before external integrators depend on response shape.
+
+**Current state:** `api.py:131,179` raises `HTTPException(detail=str(error))` — bare string. `CompactHumanizeResponse` in `schemas.py:61–69` has no `report_id`. `ErrorBody` in `schemas.py:92–96` exists but is unused.
+
+| Where | How |
+|-------|-----|
+| **`src/adh/ids.py`** (new) | `new_report_id() -> str` returns `report_` + 16 hex; same for `job_`, `req_`. Use `secrets.token_hex(8)`. |
+| **`src/adh/errors.py`** (new) | Map each `AdhError` subclass → `{code, retryable, doc_url}`. `error_response(exc, request_id) -> dict`. Catalog constant `ERROR_CODES`. |
+| **`src/adh/exceptions.py`** | Add optional `code: str` attribute on base `AdhError`; set on subclasses (`InputError.code = "invalid_input"`, etc.). |
+| **`src/adh/report.py`** | Add optional field `report_id: str | None = None` on `RunReport`; set in `engine.humanize()` return path or in `service.run_humanize()`. |
+| **`src/adh/schemas.py`** | Extend `CompactHumanizeResponse`: `report_id`, optional `output` alias (= `output_text`), optional `metadata`. Add `StructuredErrorResponse` model. |
+| **`src/adh/api.py`** | Middleware: assign `request.state.request_id = new_request_id()`, set header `X-Request-Id`. Exception handler: return `{"error": {...}}` instead of `{"detail": "..."}`. |
+| **`src/adh/cli.py`** | On `_fail`, if `--json`, print same error envelope as HTTP. |
+| **`docs/BACKEND_PRD.md`** | New § “Error codes” table; document `X-Request-Id`, `report_id` on responses. |
+
+**Test cases** — extend `tests/test_api.py` + new `tests/test_errors.py`:
+
+| Test | Assert |
+|------|--------|
+| `test_humanize_response_includes_report_id` | 200 body has `report_id` matching `^report_[0-9a-f]{16}$`. |
+| `test_request_id_header_on_all_routes` | `GET /health`, `POST /v1/score` → `X-Request-Id` header matches `^req_`. |
+| `test_unknown_detector_structured_error` | `POST /v1/score` with `detector: "nope"` → 422, body `error.code == "unknown_detector"`, `error.request_id` present, `error.doc_url` is URL string. |
+| `test_rewriter_missing_key_error` | No key, non-identity rewriter → 502, `error.code == "rewriter_unavailable"`, `retryable is False`. |
+| `test_pangram_inner_loop_error` | Existing `test_humanize_pangram_stub_is_not_found_as_loop_detector` updated: assert `error.code == "remote_detector_unsupported"`. |
+| `test_cli_json_error_matches_http_shape` | CLI `--json` on invalid input → stderr/stdout JSON with same `code` as HTTP. |
+| `test_error_codes_documented_in_backend_prd` | `tests/test_setup_docs.py`: read BACKEND_PRD, assert each `ERROR_CODES` key appears in doc. |
+
+---
+
+### Step 1 — Package boundary (core vs doors)
+
+**Goal:** Engine + report types import no transport; CLI and API share one service function so reports cannot drift.
+
+**When:** Before Step 6 (jobs) or Step 8 (MCP) — any new surface should call the service, not copy wiring.
+
+**Current violations to fix:**
+
+| Module | Imports to remove from core path |
+|--------|----------------------------------|
+| `engine.py` | Already clean (no FastAPI/Typer). Keep it that way. |
+| New **`service.py`** | `run_humanize(text, *, config: AdhConfig \| EngineConfig, ...) -> RunReport` — loads detector/rewriter/gate via factory, calls `humanize()`. |
+| **`cli.py`** | Replace inline `EngineConfig(...)` block with `service.run_humanize(...)`. |
+| **`api.py`** | Same; endpoints only parse `HumanizeRequest` → service call → serialize. |
+
+| Where | How |
+|-------|-----|
+| **`src/adh/service.py`** (new) | `build_engine_config(from_request: HumanizeRequest \| AdhConfig) -> EngineConfig`. `run_humanize(...)`, `run_score(...)`. |
+| **`src/adh/config.py`** (stub) | Minimal `AdhConfig` dataclass mirroring future yaml fields; Step 3 expands it. |
+| **`tests/test_service.py`** (new) | Parity tests (below). |
+| **`docs/ARCHITECTURE.md`** | Update “Surfaces” table: CLI/API → `service.py` → `engine.py`. |
+
+**Import boundary test** — add `tests/test_import_boundary.py`:
+
+| Test | Assert |
+|------|--------|
+| `test_core_modules_no_fastapi` | `importlib.util.find_spec` / AST scan: `engine`, `report`, `gates`, `preserve`, `detectors`, `ranking`, `audit` do not import `fastapi`, `typer`, `uvicorn`. |
+| `test_service_produces_same_report_as_cli` | Same text + fake detector + identity rewriter: `service.run_humanize(...)` vs CLI subprocess or direct call → equal `stop_reason`, `score_before`, `score_after`, `output_text`. |
+| `test_service_produces_same_report_as_api` | `TestClient` POST vs `service.run_humanize` with equivalent config → same compact fields. |
+| `test_engine_config_fields_match_humanize_request` | Field parity checklist: every `HumanizeRequest` field maps to `EngineConfig` in `build_engine_config` (prevents drift). |
+
+---
+
+### Step 2 — Plugin registry (replace factory if-chain)
+
+**Goal:** Built-in and third-party detectors/rewriters register by name; no edit to `factory.py` for new plugins.
+
+**When:** After Step 1 (service loads via registry). Lock group names before publishing.
+
+**Current state:** `factory.py:25–63` — 15+ `if/elif` branches. `pyproject.toml` has no `[project.entry-points]`.
+
+| Where | How |
+|-------|-----|
+| **`pyproject.toml`** | Add `[project.entry-points."adh.detectors"]`, `"adh.rewriters"`, `"adh.gates"` per §6 of this doc. Map each existing class. |
+| **`src/adh/registry.py`** (new) | `load_plugin(group, name, **kwargs)`, `list_plugins(group) -> list[str]`. Use `importlib.metadata.entry_points(group=group)` — never `pkg_resources`. |
+| **`src/adh/factory.py`** | Replace body of `load_detector` with `registry.load_plugin("adh.detectors", name, ...)`. Keep `assert_inner_loop_detector` here. |
+| **`src/adh/rewriter.py`** | Move `IdentityRewriter` registration target; optional `rewriters/testing.py` if splitting. |
+| **`tests/fixtures_plugin/`** (new, dev only) | Tiny package with one fake entry point for integration test. |
+
+**Test cases** — `tests/test_registry.py`:
+
+| Test | Assert |
+|------|--------|
+| `test_load_builtin_fake_detector` | `load_detector("fake")` → `FakeDetector`, `.name == "fake"`. |
+| `test_load_all_entry_point_detectors` | Every name in `list_plugins("adh.detectors")` loads without exception. |
+| `test_unknown_detector_lists_available` | `load_detector("nope")` raises `InputError`; message contains at least `"fake"`. |
+| `test_third_party_entry_point` | Install fixture plugin in test via `importlib.metadata` mock or `pytest` monkeypatch of `entry_points()` → load by custom name. |
+| `test_registry_cold_start_under_200ms` | `time.perf_counter()` around first `load_detector("fake")` < 0.2s (mark `@pytest.mark.slow` optional). |
+| `test_service_uses_registry` | After refactor, `service.run_score(..., detector="statistical")` works. |
+
+---
+
+### Step 3 — `adh.yaml` + profiles + `adh init`
+
+**Goal:** One config file read by CLI, server, and (later) MCP; profiles bundle knobs.
+
+**When:** After Steps 0–2 so profiles can reference registry names.
+
+**Current state:** All config via CLI flags (`cli.py:131–163`) and HTTP body (`schemas.py:29–58`). Server `create_app()` binds detector at startup (`cli.py:115–122`) — does not read a file.
+
+| Where | How |
+|-------|-----|
+| **`src/adh/config.py`** | Pydantic model `AdhConfig` matching §5 yaml. `load_config(path: Path \| None)` — cwd `adh.yaml`, else `ADH_CONFIG` env. `apply_profile(name) -> AdhConfig`. `merge_cli_overrides(config, **flags)`. |
+| **`src/adh/profiles.py`** | `PROFILE_PRESETS: dict[str, partial[AdhConfig]]` for `fast`, `standard`, `quality`, `verify-only`. |
+| **`examples/adh.yaml`** (new) | Committed template. |
+| **`src/adh/cli.py`** | Commands: `init` (write `examples/adh.yaml` to cwd), `humanize`/`serve` call `load_config()`. Flags override file values. |
+| **`src/adh/api.py`** | Optional `profile: str` on `HumanizeRequest`; server startup `create_app(config_path=...)`. |
+| **`src/adh/schemas.py`** | Add `profile: str \| None`, `metadata: dict[str, str] \| None` to `HumanizeRequest`. |
+
+**Test cases** — `tests/test_config.py`:
+
+| Test | Assert |
+|------|--------|
+| `test_init_writes_adh_yaml` | `adh init` in tmp_path → `adh.yaml` exists, parses as valid YAML. |
+| `test_load_config_from_cwd` | Write yaml with `profile: fast`; `load_config()` → detector fake, rewriter identity. |
+| `test_cli_flag_overrides_yaml` | File says `target_score: 30`; CLI `--target 20` → `EngineConfig.target_score == 20`. |
+| `test_serve_loads_same_config` | Set `ADH_CONFIG=tmp/adh.yaml`; create_app reads default detector from file. |
+| `test_profile_standard_fields` | `apply_profile("standard")` → `max_rounds in (3,5)`, detector default `qwen3-variable`. |
+| `test_unknown_profile_raises` | `apply_profile("nope")` → `InputError` with code `unknown_profile`. |
+| `test_api_accepts_profile_field` | POST with `"profile": "fast"` only + text → 200 without OpenAI key (identity rewriter). |
+| `test_config_field_names_match_humanize_request` | Automated diff: yaml keys ↔ `HumanizeRequest` fields (API review gate helper). |
+
+---
+
+### Step 4 — `adh doctor`
+
+**Goal:** Pre-flight checklist before production profile or CI integration.
+
+**When:** After Step 3 (reads same config).
+
+| Where | How |
+|-------|-----|
+| **`src/adh/doctor.py`** (new) | Checks: Python ≥3.11, optional `[local]` torch import, `OPENAI_API_KEY` if profile needs rewriter, Raschka artifact for configured detector, Pangram key if `verify` non-empty, writable models dir. Returns `list[CheckResult]`. |
+| **`src/adh/cli.py`** | `@app.command() def doctor(...)` — print table, exit 1 if any failed. |
+| **`docs/SETUP.md`** | Document doctor output and fixes. |
+
+**Test cases** — `tests/test_doctor.py`:
+
+| Test | Assert |
+|------|--------|
+| `test_doctor_fast_profile_all_green_no_keys` | Config profile fast → all checks pass without env keys. |
+| `test_doctor_standard_fails_without_rewriter_key` | Profile standard, no `OPENAI_API_KEY` → failed check with actionable message. |
+| `test_doctor_reports_missing_local_model` | Profile standard + detector qwen3-variable + no artifact → `DetectorNotReady`-style warning. |
+| `test_doctor_exit_code_1_on_failure` | CLI `adh doctor` with bad config → exit code 1. |
+| `test_doctor_json_output` | `--json` → list of `{name, ok, message, fix}`. |
+
+---
+
+### Step 5 — Sync API polish (contract freeze)
+
+**Goal:** Stable agent-facing sync API: compact default, idempotency, metadata, agent_hint, OpenAPI catalog.
+
+**When:** After Steps 0b, 1, 3 — builds on IDs, service layer, profiles.
+
+| Where | How |
+|-------|-----|
+| **`src/adh/idempotency.py`** (new) | In-memory dict keyed by `(Idempotency-Key, hash(body))` → cached `report_id` + response; TTL 24h. Optional SQLite for multi-worker later. |
+| **`src/adh/api.py`** | Read header `Idempotency-Key` on `POST /v1/humanize`; return cached 200 on replay. Middleware already from 0b. |
+| **`src/adh/schemas.py`** | `compact: bool = True` (breaking default change — document in BACKEND_PRD changelog). Add `agent_hint: str` on compact response; derive from `stop_reason` map in `service.py`. |
+| **`src/adh/service.py`** | `agent_hint_for(report) -> str` e.g. passed → “Local score reached target…”. |
+| **`docs/BACKEND_PRD.md`** | Full `stop_reason` enum, error catalog, idempotency semantics, metadata limits (50 keys). |
+| **`CONTRIBUTING.md`** or ROADMAP §4a | API review checklist for PRs touching public fields. |
+
+**Test cases** — extend `tests/test_api.py`, `tests/test_schemas.py`, new `tests/test_idempotency.py`:
+
+| Test | Assert |
+|------|--------|
+| `test_compact_true_by_default` | POST `/v1/humanize` minimal body → response has `ai_score_before`, not full `sentences` array. |
+| `test_compact_false_returns_full_report` | `"compact": false` → includes `sentences`, `locks`. |
+| `test_agent_hint_present_on_compact` | Every `stop_reason` in enum → non-empty `agent_hint`. |
+| `test_metadata_round_trip` | Request `metadata: {"ticket":"123"}` echoed on response. |
+| `test_metadata_max_keys_rejected` | 51 keys → 422 `invalid_input`. |
+| `test_idempotency_same_key_same_body` | Two POSTs same key → same `report_id`, humanize called once (mock/spy on engine). |
+| `test_idempotency_same_key_different_body` | 409 or 422 `idempotency_key_reused`. |
+| `test_output_alias_equals_output_text` | `output == output_text`. |
+| `test_openapi_lists_stop_reasons` | `/openapi.json` description or enum includes all `StopReason` values. |
+
+---
+
+### Step 6 — Async jobs
+
+**Goal:** Long humanize runs without gateway timeout; same engine, job polling semantics.
+
+**When:** After Step 5 (reuse idempotency, error envelope, report_id).
+
+| Where | How |
+|-------|-----|
+| **`src/adh/jobs/store.py`** (new) | `JobRecord`: `job_id`, `status`, `report_id?`, `error?`, `metadata`, `created_at`. SQLite or in-memory + background thread. |
+| **`src/adh/jobs/worker.py`** (new) | Pull pending jobs → `service.run_humanize()` → update store. |
+| **`src/adh/api.py`** | `POST /v1/jobs/humanize` → 202 + `Location`; `GET /v1/jobs/{job_id}` → 200 always while polling. |
+| **`src/adh/schemas.py`** | `JobCreateRequest`, `JobResponse`. |
+| **`src/adh/cli.py`** | Optional `adh humanize --async` → POST job, poll until done. |
+
+**Test cases** — `tests/test_jobs.py`:
+
+| Test | Assert |
+|------|--------|
+| `test_create_job_returns_202` | POST → 202, body `job_id` matches `^job_`, `status == "pending"`. |
+| `test_poll_until_done` | GET after worker runs → `status == "done"`, `report_id` present, nested `report` or link. |
+| `test_get_job_always_200_while_polling` | Pending/processing/done all return 200 (not 202 on GET). |
+| `test_failed_job_structured_error` | Force rewriter error → `status == "failed"`, `error.code` set. |
+| `test_job_idempotency` | Same `Idempotency-Key` on create → same `job_id`. |
+| `test_job_metadata_persisted` | Metadata on create echoed on GET. |
+| `test_cli_async_humanize` | `--async` prints job_id then final output (mock fast worker). |
+
+---
+
+### Step 7 — Docker
+
+**Goal:** One-command team deploy with same contract as local.
+
+**When:** After Steps 5–6 stable.
+
+| Where | How |
+|-------|-----|
+| **`Dockerfile`** | Multi-stage: base + optional `[local]` CUDA variant. `CMD ["adh", "serve", "--host", "0.0.0.0"]`. |
+| **`docker-compose.yml`** | Service `adh`, volume `./models:/root/.cache/...`, env file, port 8000. |
+| **`.dockerignore`** | Exclude `.venv`, `docs/resources/`. |
+
+**Test cases** — `tests/test_docker.py` (optional, `@pytest.mark.slow`):
+
+| Test | Assert |
+|------|--------|
+| `test_dockerfile_builds` | `docker build -t adh:test .` exit 0. |
+| `test_compose_health` | `docker compose up -d` → `curl /health` 200 within 60s. |
+| `test_compose_humanize_fast_profile` | POST humanize with profile fast → 200. |
+
+---
+
+### Step 8 — MCP server
+
+**Goal:** Cursor / Claude Code invoke score, humanize, doctor without custom HTTP glue.
+
+**When:** After Steps 3–5 (profiles + compact + agent_hint).
+
+| Where | How |
+|-------|-----|
+| **`src/adh/mcp_server.py`** (new) | stdio MCP; tools call `service.py` in-process (not reimplemented loop). |
+| **`src/adh/cli.py`** | `adh mcp serve` subcommand. |
+| **`pyproject.toml`** | Optional dep `mcp` extra. |
+
+**Test cases** — `tests/test_mcp.py`:
+
+| Test | Assert |
+|------|--------|
+| `test_mcp_lists_tools` | score, humanize, doctor, verify registered. |
+| `test_mcp_humanize_fast_no_key` | Tool call with profile fast → compact JSON with agent_hint. |
+| `test_mcp_schema_matches_http_fields` | Tool input schema keys ⊆ `HumanizeRequest` fields. |
+
+---
+
+### Step 9 — SDK + integrations
+
+**Goal:** `pip install adh-sdk` (or extra) wraps `/v1` with typed client; examples for LangChain/n8n.
+
+**When:** Last — contract frozen.
+
+| Where | How |
+|-------|-----|
+| **`src/adh_sdk/`** or **`packages/adh-sdk/`** | `Client(base_url, api_key=None)`, `humanize(text, profile=...)`, `poll_job(job_id)`. |
+| **`examples/langchain_tool.py`**, **`examples/n8n/`** | Copy-paste templates. |
+
+**Test cases** — `tests/test_sdk.py`:
+
+| Test | Assert |
+|------|--------|
+| `test_sdk_humanize_against_testclient` | SDK pointed at `TestClient` app → same response as raw HTTP. |
+| `test_sdk_idempotency_header` | Client sends `Idempotency-Key` automatically on retry helper. |
+| `test_sdk_poll_job` | Create job via SDK → poll until done. |
+
+---
+
+### Cross-cutting: API review gate (ongoing)
+
+**When:** Every PR that touches `schemas.py`, `cli.py` options, `config.py`, `mcp_server.py` tool schemas, or `examples/adh.yaml`.
+
+**Automated test** — `tests/test_contract_parity.py`:
+
+| Test | Assert |
+|------|--------|
+| `test_humanize_fields_cli_api_yaml` | Set diff empty between public field names across the three surfaces (allowlist for transport-only fields). |
+| `test_stop_reason_enum_frozen` | Snapshot test: changing `StopReason` in `report.py` fails until BACKEND_PRD + OpenAPI updated. |
+| `test_error_codes_synced` | Every `ERROR_CODES` key in BACKEND_PRD; every `AdhError` subclass has `.code`. |
+
+---
+
+### Test file map (summary)
+
+| File | Steps covered |
+|------|----------------|
+| `tests/test_test_mode.py` | 0 |
+| `tests/test_errors.py` | 0b |
+| `tests/test_service.py` | 1 |
+| `tests/test_import_boundary.py` | 1 |
+| `tests/test_registry.py` | 2 |
+| `tests/test_config.py` | 3 |
+| `tests/test_doctor.py` | 4 |
+| `tests/test_idempotency.py` | 5 |
+| `tests/test_api.py` (extend) | 0b, 5 |
+| `tests/test_schemas.py` (extend) | 5 |
+| `tests/test_jobs.py` | 6 |
+| `tests/test_docker.py` | 7 (slow, optional CI job) |
+| `tests/test_mcp.py` | 8 |
+| `tests/test_sdk.py` | 9 |
+| `tests/test_contract_parity.py` | ongoing |
+| `tests/test_setup_docs.py` (extend) | docs stay synced |
+
+**CI recommendation:** Run all except `test_docker*` and `@pytest.mark.slow` on every push; nightly job for Docker + model downloads.
+
+---
+
+## 16. References
 
 - [Soup CLI](https://trysoup.dev/) — config file, profiles, MCP, backend-first product shape
 - [Stripe API design](https://stripe.com/docs/api) — idempotency, prefixed IDs, actionable errors, metadata, API review discipline
