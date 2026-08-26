@@ -1,58 +1,81 @@
 # Architecture
 
+Engine layout today and target package boundary. **Transformation plan:** [ROADMAP.md](ROADMAP.md).
+
+## Loop (current)
+
 ```
 input
+  → optional scrub (Unicode)
+  → detector.score (document)
+  → optional structural prepass (flagged paragraphs only)
   → split sentences (pysbd, offsets kept)
-  → detector.score (whole text) and detector.score_spans (per sentence)
-  → flag sentences over threshold (or top-k)
-  → preserve-lock facts
-  → rewriter.register-shift (OpenAI-compatible, best-of-N)
-  → restore locks (reject if sentinels missing)
-  → semantic gate (MiniLM or lexical)
-  → rescore
+  → detector.score_spans (per sentence)
+  → flag sentences over threshold (or top-k, max_rewrite_ratio)
+  → preserve-lock facts → rewriter (best-of-N, optional history)
+  → logprob + detector blend → meaning gate stack → restore locks
+  → optional hard-mode token guidance (stubborn sentences)
+  → reassemble → document-level gate → rescore
   → repeat until target, max rounds, or no valid candidate
+  → optional verify + detector breakdown
   → RunReport
 ```
 
-## Detector protocol
+## Protocols
 
-`Detector.score(text) -> ScoreResult`  
-`Detector.score_spans(texts) -> list[ScoreResult]`
+| Protocol | Methods | Implementations |
+|----------|---------|-----------------|
+| **Detector** | `score()`, `score_spans()` | Raschka local, fake, statistical, ensemble (max/mean), Pangram, GPTZero |
+| **Rewriter** | `rewrite()`, `rewrite_candidates()` | OpenAI-compatible, test helpers |
+| **SemanticGate** | similarity check | MiniLM, lexical |
+| **Translator** | `translate()` | LLM, Google (optional), identity (tests) |
 
-Adapters:
+Factory: `src/adh/factory.py` (moving to entry-point registry per [ROADMAP.md](ROADMAP.md)).
 
-- `LocalRaschkaDetector` — published HF exports from rasbt
-- `FakeDetector` / `CueDetector` (tests)
-- `PangramDetector`, `GPTZeroDetector` — remote verification via REST (`adh score`); blocked in `humanize` inner loop
-- `EnsembleDetector` — weighted blend of ready members
+## Meaning gates
 
-Default quality model: `qwen3-variable`. Faster: `distilbert`. CI: `fake` or `logreg` when present.
+`MeaningGateStack` (`gates/stack.py`) combines semantic similarity with mechanical vetoes: numerals, hedges, deletion, optional NLI entailment, optional role preservation, scaffolding checks.
+
+Modes: `auto`, `minilm`, `lexical`, `full` via CLI `--meaning-gate`.
 
 ## Quality gates
 
-- Preserve-lock sentinels `__LOCK_<token>_<nnn>__`
+- Preserve-lock sentinels `__LOCK_<token>_<nnn>__` — multiset equality enforced
 - Semantic cosine ≥ `min_semantic_similarity` (default 0.88)
-- `max_rewrite_ratio` caps how much of the document can be rewritten in a round
+- `max_rewrite_ratio` caps rewritten words per round
+- AI-tells tie-break when detector scores are close
+
+## Detectors
+
+- **Inner loop:** local Raschka exports, fake, statistical, `ensemble-local` (qwen3 + statistical, max)
+- **Verify / score only:** Pangram, GPTZero — blocked as inner-loop drivers (latency + cost)
+
+Default quality model: `qwen3-variable`. CI: `fake`. See `adh models list`.
 
 ## Stop reasons
 
 `passed`, `max_rounds`, `no_flagged_sentences`, `all_candidates_rejected`, `max_rewrite_ratio`, `already_below_target`
 
-The engine always returns a report, including the best intermediate text.
+The engine always returns a report with the best intermediate text.
+
+## Surfaces (today)
+
+| Surface | Module | Calls |
+|---------|--------|-------|
+| Library | `adh.engine.humanize` | Engine directly |
+| CLI | `adh.cli` | Engine + factory |
+| HTTP | `adh.api` | Engine + factory |
+
+**Target:** CLI and HTTP become thin wrappers over a pure core package — see [ROADMAP.md §3](ROADMAP.md#3-target-architecture).
 
 ## Environment
 
-The CLI loads `.env` from the working directory via python-dotenv. Template: [`.env.example`](../.env.example). Setup: [SETUP.md](SETUP.md).
+CLI loads `.env` via python-dotenv. Template: [`.env.example`](../.env.example). Setup: [SETUP.md](SETUP.md).
 
-Used today:
-
-- `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL` — OpenAI-compatible rewriter
-- `ADH_MODELS_DIR` — local Raschka artifact cache
-
-Reserved, unused until remote detectors ship:
-
-- `PANGRAM_API_KEY`, `GPTZERO_API_KEY`
+- `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL` — rewriter
+- `ADH_MODELS_DIR` — Raschka artifact cache
+- `PANGRAM_API_KEY`, `GPTZERO_API_KEY` — verification scoring
 
 ## HTTP
 
-See [BACKEND_PRD.md](BACKEND_PRD.md). Routes: `GET /health`, `GET /v1/models`, `POST /v1/score`, `POST /v1/humanize`, `POST /v1/sentences`.
+Current routes: [BACKEND_PRD.md](BACKEND_PRD.md). Planned: async jobs, MCP — [ROADMAP.md](ROADMAP.md).

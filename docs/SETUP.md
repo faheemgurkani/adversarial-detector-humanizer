@@ -2,6 +2,8 @@
 
 This is the setup guide for the open-core CLI, library, and local HTTP API.
 
+**Product roadmap** (config file, Docker, MCP, agents): [ROADMAP.md](ROADMAP.md).
+
 Python **3.11** is the supported version for this repository. Python 3.12 usually works; 3.10 does not.
 
 GPTZero and Pangram are **verification detectors**. Set their keys in `.env`, then score with `--detector pangram` or `--detector gptzero`. They cannot drive the `humanize` inner loop (too slow and billed per call).

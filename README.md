@@ -2,23 +2,26 @@
 
 Detector-verified, sentence-targeted, meaning-preserving text humanizer.
 
-This is an **open-core engine**, not a one-shot paraphraser. It scores text, rewrites only the sentences a detector flags, locks facts and citations, and rejects candidates that drift in meaning. It reports before/after scores. It does **not** guarantee that any commercial detector will call the result human.
+This is an **open-core engine and backend utility**, not a one-shot paraphraser. It scores text, rewrites only the sentences a detector flags, locks facts and citations, and rejects candidates that drift in meaning. It reports before/after scores. It does **not** guarantee that any commercial detector will call the result human.
 
 > Verified score reduction — we show before/after, no bypass guarantees.
+
+**Transformation plan (CLI + API + agents + Docker):** [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## What it does
 
 ```
 Score → flag sentences → preserve-lock facts → register-shift rewrite
-      → restore locks → semantic gate → re-score → repeat
+      → restore locks → meaning gates → re-score → repeat
 ```
 
 - **Detector-guided loop** rather than a blind full rewrite
 - **Register/style shift** (rhythm, transitions, hedging) rather than synonym maps
 - **Preserve-lock** for numbers, URLs, emails, DOIs, quotes, code, acronyms, names
-- **Semantic gate** so meaning cannot silently flip
+- **Meaning gate stack** so facts and hedges cannot silently flip
 - **Local Raschka detectors** as the free/dev verifier
-- **Remote adapters** for Pangram 4 and GPTZero v2 (`adh score` verification)
+- **Remote adapters** for Pangram 4 and GPTZero v2 (verify / `adh score`)
+- **Optional:** statistical ensemble, structural prepass, hard mode, post-loop verify
 
 Local scores are proxies. They correlate with tools such as Pangram; they are not Pangram.
 
@@ -53,7 +56,7 @@ python -m pip install -e ".[dev]"
 cp .env.example .env
 ```
 
-Edit `.env` and set `OPENAI_API_KEY` (and optionally `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL`) before `adh humanize`. The CLI loads `.env` from the working directory. For verification scoring, add `PANGRAM_API_KEY` and/or `GPTZERO_API_KEY` and use `adh score --detector pangram|gptzero` (not supported as the humanize inner loop).
+Edit `.env` and set `OPENAI_API_KEY` (and optionally `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL`) before `adh humanize`. For verification scoring, add `PANGRAM_API_KEY` and/or `GPTZERO_API_KEY` and use `adh score --detector pangram|gptzero` or `--verify` on humanize (not supported as the humanize inner loop).
 
 Local neural detectors and MiniLM need the `local` extra:
 
@@ -70,7 +73,7 @@ Published weights live on the Hugging Face Hub under `rasbt/ai-text-detector-*` 
 adh --help
 adh models list
 adh score --detector fake --text "Furthermore, it is important to note the result."
-adh humanize --detector fake --semantic lexical --allow-lexical-gate \
+adh humanize --detector ensemble-local --semantic lexical --allow-lexical-gate \
   --text "Furthermore, it is important to note the result in 2024."
 ```
 
@@ -89,7 +92,7 @@ JSON `RunReport`:
 adh humanize --file examples/sample.txt --json --output out.txt
 ```
 
-The report includes `score_before`, `score_after`, `semantic_similarity`, per-sentence diffs, and lock records. That object is the seed for `POST /v1/humanize`.
+The report includes `score_before`, `score_after`, `semantic_similarity`, per-sentence diffs, locks, verification, and detector breakdown. That object is the seed for `POST /v1/humanize`.
 
 ## HTTP API
 
@@ -113,19 +116,14 @@ Interactive docs: `http://127.0.0.1:8000/docs`. Full contract: [docs/BACKEND_PRD
 
 ```python
 from adh.engine import EngineConfig, humanize
-from adh.detectors.fake import FakeDetector
-from adh.rewriter import ScriptedRewriter
-from adh.semantic import LexicalSemanticGate
+from adh.factory import load_detector, load_rewriter
+from adh.gates import build_meaning_gate_stack
 
 report = humanize(
     "Furthermore, the method is important to note in 2024.",
-    detector=FakeDetector(default_score=90),
-    rewriter=ScriptedRewriter({
-        "Furthermore, the method is important to note in 2024.": [
-            "The method mattered in 2024."
-        ]
-    }),
-    semantic_gate=LexicalSemanticGate(),
+    detector=load_detector("fake"),
+    rewriter=load_rewriter(),
+    meaning_gate_stack=build_meaning_gate_stack(prefer="lexical", allow_lexical=True),
     config=EngineConfig(min_semantic_similarity=0.2),
 )
 print(report.to_public_dict())
@@ -143,12 +141,14 @@ CI uses `FakeDetector` and a lexical gate. No GPU and no paid APIs are required.
 ## Project layout
 
 ```
-src/adh/            engine, CLI, preserve-lock, semantic gate, detectors
-tests/              unit tests for every module
-docs/SETUP.md       clone, venv, extras, .env, first commands
-docs/PRODUCT.md     later SaaS / API / extension PRD
-docs/ARCHITECTURE.md
-.env.example        rewriter and optional detector env template
+src/adh/              engine, CLI, API, detectors, gates, prepass, hard mode
+tests/                unit tests for every module
+docs/ROADMAP.md       transformation plan (single source of truth)
+docs/BACKEND_PRD.md   HTTP contract
+docs/ARCHITECTURE.md  engine design
+docs/SETUP.md         install and first commands
+docs/BENCHMARK.md     smoke benchmarks
+.env.example          rewriter and optional detector env template
 examples/sample.txt
 ```
 

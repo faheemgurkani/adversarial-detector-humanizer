@@ -4,6 +4,8 @@ Open-core HTTP and library contract for `adversarial-detector-humanizer`.
 
 The ASGI app in `src/adh/api.py` is a thin wrapper around `adh.engine.humanize`. A later hosted SaaS must keep calling this engine. It must not reimplement the loop in another language.
 
+**Planned product changes** (async jobs, config file, MCP): [ROADMAP.md](ROADMAP.md). This document describes the **current** `/v1` contract; additive fields are preferred over breaking changes.
+
 Positioning: **verified score reduction**. Local detector scores are proxies. This API does not guarantee a Pangram, GPTZero, or Turnitin pass.
 
 ---
@@ -128,10 +130,15 @@ Closed loop: score → flag sentences → preserve-lock → register-shift rewri
 | `sentence_threshold` | float 0–100 | 50 |
 | `min_semantic_similarity` | float 0–1 | 0.88 |
 | `max_rewrite_ratio` | float 0–1 | 0.4 |
-| `best_of_n` | int 1–8 | 2 |
+| `best_of_n` | int 1–8 | 3 |
 | `rewriter_model` | string or null | env `ADH_REWRITER_MODEL` |
 | `semantic` | `auto` / `minilm` / `lexical` | `auto` |
+| `meaning_gate_mode` | string | `auto` |
 | `allow_lexical_gate` | bool | false |
+| `verify` | list of strings | `[]` |
+| `deploy_detectors` | list of strings | `[]` |
+| `hard_mode` | bool | false |
+| `prepass` | string | `none` |
 | `compact` | bool | false |
 
 **200 full** (`RunReport`)
@@ -205,12 +212,20 @@ Tested: `test_sentences`, `test_sentences_empty`.
 
 | Module | Role | Tests |
 |--------|------|--------|
-| `adh.engine` | Loop, flagging, best-of-N, stop reasons | `test_engine.py` |
+| `adh.engine` | Loop, flagging, prepass, history, stop reasons | `test_engine.py` |
 | `adh.preserve` | Fact/citation sentinels | `test_preserve.py` |
+| `adh.gates` | Meaning gate stack | `test_meaning_gates.py` |
+| `adh.scrub` | Unicode pre-loop scrub | `test_scrub.py` |
+| `adh.tells` | AI-tells tie-break | `test_tells.py` |
+| `adh.ranking` | Logprob + detector blend | `test_ranking.py` |
+| `adh.prepass` | Structural translation pre-pass | `test_prepass.py` |
+| `adh.hard` | Token-guided decode | `test_ap_features.py` |
+| `adh.verify` | Post-loop commercial verify | `test_verify.py` |
+| `adh.audit` | Detector breakdown | `test_audit.py` |
 | `adh.sentences` | Split + reassemble with offsets | `test_sentences.py` |
 | `adh.semantic` | MiniLM / lexical cosine gate | `test_semantic.py` |
-| `adh.rewriter` | OpenAI-compatible register-shift | `test_rewriter.py` |
-| `adh.detectors.*` | Protocol, Raschka, fake, remote stubs, ensemble | `test_detectors.py`, `test_local_raschka.py` |
+| `adh.rewriter` | OpenAI-compatible register-shift | `test_rewriter.py`, `test_rewrite_history.py` |
+| `adh.detectors.*` | Protocol, Raschka, fake, statistical, remote, ensemble | `test_detectors.py`, `test_statistical_detector.py` |
 | `adh.models` | Hub registry, fetch, cache dir | `test_models.py` |
 | `adh.report` | `RunReport` / compact dict | `test_report.py` |
 | `adh.schemas` | HTTP Pydantic contracts | used by `test_api.py` |
@@ -232,13 +247,14 @@ Tested: `test_sentences`, `test_sentences_empty`.
 
 ---
 
-## Auth, metering, paid detectors (not in this process)
+## Auth, metering, async jobs (not in this process)
 
-Documented for the hosted follow-on. Not implemented here.
+Documented in [ROADMAP.md](ROADMAP.md). Not implemented in the open-core server.
 
-- API keys and Stripe
+- API keys and Stripe (optional hosted tier)
 - Word metering
-- One Pangram 4 `predict()` at start and end (`$0.05 / 100` words). Inspect `windows[].is_humanized` and `humanizer_score`
+- Async `POST /v1/jobs/humanize` + polling
+- One Pangram 4 `predict()` at start and end when verify is enabled
 - Optional GPTZero `POST https://api.gptzero.me/v2/predict/text`
 
 ---

@@ -28,3 +28,11 @@ def test_setup_doc_exists() -> None:
     assert "python3.11 -m venv .venv" in text
     assert "cp .env.example .env" in text
     assert "adh models fetch" in text
+
+
+def test_roadmap_doc_exists() -> None:
+    path = ROOT / "docs" / "ROADMAP.md"
+    assert path.is_file()
+    text = path.read_text(encoding="utf-8")
+    assert "adh.yaml" in text
+    assert "entry_points" in text
