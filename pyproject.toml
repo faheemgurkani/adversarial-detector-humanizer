@@ -75,6 +75,35 @@ dev = [
 [project.scripts]
 adh = "adh.cli:app"
 
+[project.entry-points."adh.detectors"]
+fake = "adh.detectors.fake:FakeDetector"
+statistical = "adh.detectors.statistical:StatisticalDetector"
+pangram = "adh.detectors.remote:PangramDetector"
+gptzero = "adh.detectors.remote:GPTZeroDetector"
+ensemble = "adh.detectors.ensemble:build_ensemble"
+ensemble-max = "adh.detectors.ensemble:build_ensemble_max"
+ensemble-local = "adh.detectors.ensemble:build_ensemble_local"
+logreg = "adh.detectors.local_raschka:LocalRaschkaDetector"
+distilbert = "adh.detectors.local_raschka:LocalRaschkaDetector"
+distilbert-lora = "adh.detectors.local_raschka:LocalRaschkaDetector"
+distilbert-mica = "adh.detectors.local_raschka:LocalRaschkaDetector"
+modernbert = "adh.detectors.local_raschka:LocalRaschkaDetector"
+gpt2-variable = "adh.detectors.local_raschka:LocalRaschkaDetector"
+gpt2-fixed = "adh.detectors.local_raschka:LocalRaschkaDetector"
+qwen3-variable = "adh.detectors.local_raschka:LocalRaschkaDetector"
+qwen3-fixed = "adh.detectors.local_raschka:LocalRaschkaDetector"
+
+[project.entry-points."adh.rewriters"]
+openai = "adh.rewriter:OpenAICompatibleRewriter"
+openai-compatible = "adh.rewriter:OpenAICompatibleRewriter"
+identity = "adh.rewriter:IdentityRewriter"
+
+[project.entry-points."adh.gates"]
+auto = "adh.semantic:build_semantic_gate"
+lexical = "adh.semantic:build_semantic_gate"
+minilm = "adh.semantic:build_semantic_gate"
+meaning = "adh.gates:build_meaning_gate_stack"
+
 [project.urls]
 Homepage = "https://github.com/faheemgurkani/adversarial-detector-humanizer"
 Repository = "https://github.com/faheemgurkani/adversarial-detector-humanizer"

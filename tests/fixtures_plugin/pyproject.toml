@@ -1,0 +1,11 @@
+# Example third-party package. Tests load AcmeDetector via a mocked entry point
+# rather than installing this file; the table shows the public contract.
+
+[project]
+name = "adh-acme-plugin"
+version = "0.0.1"
+description = "Example external ADH detector plugin."
+requires-python = ">=3.11"
+
+[project.entry-points."adh.detectors"]
+acme-nlp = "acme_plugin:AcmeDetector"

@@ -1,25 +1,20 @@
-"""Construct detectors, rewriters, and gates from CLI/API options."""
+"""Construct detectors, rewriters, and gates from the plugin registry."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from adh.detectors.base import Detector
-from adh.detectors.fake import FakeDetector
-from adh.detectors.local_raschka import LocalRaschkaDetector
-from adh.detectors.remote import (
-    EnsembleDetector,
-    GPTZeroDetector,
-    PangramDetector,
-    assert_inner_loop_detector,
-)
-from adh.detectors.statistical import StatisticalDetector
-from adh.exceptions import InputError
-from adh.gates import build_meaning_gate_stack
+from adh.detectors.remote import assert_inner_loop_detector
 from adh.gates.stack import MeaningGateStack
-from adh.models import DEFAULT_MODEL
-from adh.rewriter import IdentityRewriter, OpenAICompatibleRewriter, Rewriter
-from adh.semantic import SemanticGate, build_semantic_gate
+from adh.registry import (
+    GROUP_DETECTORS,
+    GROUP_GATES,
+    GROUP_REWRITERS,
+    load_plugin,
+)
+from adh.rewriter import Rewriter
+from adh.semantic import SemanticGate
 
 __all__ = [
     "assert_inner_loop_detector",
@@ -36,55 +31,27 @@ def load_detector(
     models_dir: Path | str | None = None,
     device: str = "auto",
 ) -> Detector:
-    if name == "fake":
-        return FakeDetector()
-    if name == "pangram":
-        return PangramDetector()
-    if name == "gptzero":
-        return GPTZeroDetector()
-    if name == "ensemble":
-        return EnsembleDetector([FakeDetector()], aggregate="max")
-    if name == "ensemble-max":
-        return EnsembleDetector([FakeDetector()], aggregate="max")
-    if name == "statistical":
-        return StatisticalDetector()
-    if name == "ensemble-local":
-        return EnsembleDetector(
-            [
-                LocalRaschkaDetector(
-                    DEFAULT_MODEL, models_dir=models_dir, device=device
-                ),
-                StatisticalDetector(),
-            ],
-            aggregate="max",
-        )
-    if name == DEFAULT_MODEL or name in {
-        "logreg",
-        "distilbert",
-        "distilbert-lora",
-        "distilbert-mica",
-        "modernbert",
-        "gpt2-variable",
-        "gpt2-fixed",
-        "qwen3-variable",
-        "qwen3-fixed",
-    }:
-        return LocalRaschkaDetector(name, models_dir=models_dir, device=device)
-    raise InputError(f"unknown detector {name!r}")
+    return load_plugin(
+        GROUP_DETECTORS,
+        name,
+        models_dir=models_dir,
+        device=device,
+    )
 
 
 def load_rewriter(*, name: str | None = None, model: str | None = None) -> Rewriter:
-    backend = (name or "openai").strip().lower()
-    if backend == "identity":
-        return IdentityRewriter()
-    if backend in {"openai", "openai-compatible"}:
-        return OpenAICompatibleRewriter(model=model)
-    raise InputError(f"unknown rewriter {name!r}")
+    backend = (name or "openai").strip().lower() or "openai"
+    return load_plugin(GROUP_REWRITERS, backend, model=model)
 
 
 def load_gate(*, prefer: str = "auto", allow_lexical: bool = False) -> SemanticGate:
-    return build_semantic_gate(prefer=prefer, allow_lexical=allow_lexical)
+    return load_plugin(
+        GROUP_GATES,
+        prefer,
+        prefer=prefer,
+        allow_lexical=allow_lexical,
+    )
 
 
 def load_meaning_gate_stack(**kwargs) -> MeaningGateStack:
-    return build_meaning_gate_stack(**kwargs)
+    return load_plugin(GROUP_GATES, "meaning", **kwargs)

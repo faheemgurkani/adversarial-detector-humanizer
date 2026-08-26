@@ -63,7 +63,7 @@ def test_ensemble_rejects_bad_weights() -> None:
 
 
 def test_load_detector_unknown() -> None:
-    with pytest.raises(InputError):
+    with pytest.raises(InputError, match="fake"):
         load_detector("nope")
 
 

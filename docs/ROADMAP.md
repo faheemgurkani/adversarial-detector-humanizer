@@ -363,9 +363,9 @@ Front-load naming contracts and package boundaries; they are painful to change a
 - [x] Single integration test: CLI and API produce identical `RunReport` for same config
 
 **Step 2 — Registry**
-- [ ] All built-in detectors/rewriters registered via entry points
-- [ ] `load_detector("unknown")` lists available names from registry
-- [ ] CLI cold start < 200ms on typical machine (no `pkg_resources`)
+- [x] All built-in detectors/rewriters registered via entry points
+- [x] `load_detector("unknown")` lists available names from registry
+- [x] CLI cold start < 200ms on typical machine (no `pkg_resources`)
 
 **Step 3 — Config**
 - [ ] `adh init` writes `adh.yaml`

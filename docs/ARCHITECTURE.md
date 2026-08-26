@@ -30,7 +30,7 @@ input
 | **SemanticGate** | similarity check | MiniLM, lexical |
 | **Translator** | `translate()` | LLM, Google (optional), identity (tests) |
 
-Factory: `src/adh/factory.py` (moving to entry-point registry per [ROADMAP.md](ROADMAP.md)).
+Plugins: `src/adh/registry.py` loads `adh.detectors`, `adh.rewriters`, and `adh.gates` via `importlib.metadata.entry_points`. `src/adh/factory.py` is a thin wrapper (policy such as `assert_inner_loop_detector` stays there).
 
 ## Meaning gates
 
