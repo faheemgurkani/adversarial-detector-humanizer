@@ -29,18 +29,59 @@ Production loop detector: `qwen3-variable` after `adh models fetch`. Dev HTTP de
 
 ## Error model
 
-All domain errors are `AdhError` subclasses mapped as:
+All domain errors are `AdhError` subclasses mapped to HTTP status codes and a structured envelope:
 
-| Exception | HTTP | When |
-|-----------|------|------|
-| `InputError`, `PreserveLockError` | 422 | Empty text, bad detector name, extra JSON fields (Pydantic), lock restore |
-| `RemoteDetectorUnavailableError` | 501 | `pangram` / `gptzero` used as the inner-loop detector |
-| `RemoteDetectorError` | 502 | Pangram or GPTZero HTTP/API failure |
-| `RewriterError` | 502 | Missing API key, upstream LLM HTTP error, empty candidates |
-| `DetectorNotReadyError`, `SemanticBackendError` | 503 | Weights missing, MiniLM extra missing |
-| Unmapped `AdhError` | 400 | Fallback |
+```json
+{
+  "error": {
+    "code": "rewriter_unavailable",
+    "message": "OPENAI_API_KEY is not set. ...",
+    "retryable": false,
+    "doc_url": "https://github.com/.../BACKEND_PRD.md#error-codes",
+    "request_id": "req_a1b2c3d4e5f67890"
+  }
+}
+```
 
-Response body: FastAPI `{"detail": "<message>"}`. Extra request fields are rejected (`extra="forbid"`).
+Every HTTP response includes `X-Request-Id: req_…` (16 hex chars).
+
+Pydantic validation failures return `422` with `error.code = "invalid_input"`.
+
+### Error codes
+
+| Code | HTTP | Retryable | When |
+|------|------|-----------|------|
+| `invalid_input` | 422 | no | Empty text, bad detector name, extra JSON fields, metadata > 50 keys |
+| `unknown_detector` | 422 | no | Detector name not in registry |
+| `preserve_lock_failed` | 422 | no | Lock restore failed |
+| `remote_detector_unsupported` | 501 | no | `pangram` / `gptzero` used as inner-loop detector |
+| `remote_detector_error` | 502 | yes | Pangram or GPTZero HTTP/API failure |
+| `rewriter_unavailable` | 502 | no | Missing API key, upstream LLM HTTP error |
+| `detector_not_ready` | 503 | no | Weights missing |
+| `semantic_backend_unavailable` | 503 | no | MiniLM extra missing |
+| `hard_mode_unavailable` | 503 | no | Hard mode extras missing |
+| `idempotency_key_reused` | 409 | no | Same `Idempotency-Key` with a different body |
+| `internal_error` | 400 | yes | Unmapped domain error |
+
+CLI `--json` failures use the same `error.code` values.
+
+---
+
+## Changelog (v0.1 contract polish)
+
+| Change | Notes |
+|--------|--------|
+| `compact` default `true` on `POST /v1/humanize` | Clients needing full `RunReport` must pass `"compact": false`. |
+| `report_id` on every humanize response | Prefix `report_` + 16 hex chars. |
+| Structured `error` object | Replaces bare FastAPI `{"detail": "..."}`. |
+| `Idempotency-Key` header | Same key + same body within 24h returns cached response. |
+| `agent_hint`, `output`, `metadata` on compact response | Additive fields for agents. |
+
+### Semver policy
+
+- `/v1/*` field names and `stop_reason` values are frozen until `/v2`.
+- Additive response fields and optional request fields are allowed in minor releases.
+- Breaking changes require a new major version path (`/v2`) and a documented migration.
 
 ---
 
@@ -140,9 +181,16 @@ Closed loop: score → flag sentences → preserve-lock → register-shift rewri
 | `deploy_detectors` | list of strings | `[]` |
 | `hard_mode` | bool | false |
 | `prepass` | string | `none` |
-| `compact` | bool | false |
+| `compact` | bool | **true** |
+| `metadata` | object (string keys/values, max 50 pairs) | `{}` |
 
-**200 full** (`RunReport`)
+**Headers**
+
+| Header | Required | Notes |
+|--------|----------|--------|
+| `Idempotency-Key` | no | Same key + same JSON body within 24h returns cached `report_id` and response |
+
+**200 full** (`compact: false`, `RunReport`)
 
 ```json
 {
@@ -154,6 +202,7 @@ Closed loop: score → flag sentences → preserve-lock → register-shift rewri
   "semantic_similarity": 0.91,
   "rounds": 1,
   "stop_reason": "passed",
+  "report_id": "report_a1b2c3d4e5f67890",
   "sentences": [
     {
       "i": 0,
@@ -172,20 +221,31 @@ Closed loop: score → flag sentences → preserve-lock → register-shift rewri
 }
 ```
 
-**200 compact** (`compact: true`)
+**200 compact** (default, `compact: true`)
 
 ```json
 {
+  "report_id": "report_a1b2c3d4e5f67890",
   "ai_score_before": 92.0,
   "ai_score_after": 18.0,
   "semantic_score": 0.91,
   "stop_reason": "passed",
   "detector": "cue",
-  "output_text": "..."
+  "output_text": "...",
+  "output": "...",
+  "agent_hint": "Local score reached target. Run verify if the user asked about Pangram or GPTZero.",
+  "metadata": {"ticket": "JIRA-123"},
+  "input": "a1b2c3d4e5f67890"
 }
 ```
 
+`output` equals `output_text`. `input` is a SHA-256 fingerprint (first 16 hex chars) of the source text.
+
 **Stop reasons:** `passed`, `max_rounds`, `no_flagged_sentences`, `all_candidates_rejected`, `max_rewrite_ratio`, `already_below_target`.
+
+### Idempotency
+
+Send `Idempotency-Key` on `POST /v1/humanize`. The server hashes the JSON body; identical replays within 24 hours return the cached response without re-running the engine. Reusing the key with a different body returns `409 idempotency_key_reused`.
 
 **501** if `detector` is `pangram` or `gptzero` (inner loop is local-only).
 

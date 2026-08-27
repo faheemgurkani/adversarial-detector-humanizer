@@ -25,6 +25,23 @@ Install `[local]` only when you need Raschka model inference or MiniLM. Do not t
 6. HTTP routes live in `src/adh/api.py` and must stay covered by `tests/test_api.py`. Contract: `docs/BACKEND_PRD.md`.
 7. Run `python -m pytest` before you open a pull request.
 
+## API review gate
+
+Any pull request that touches **public field names** must keep these surfaces aligned:
+
+| Surface | Location |
+|---------|----------|
+| HTTP request/response | `src/adh/schemas.py`, `docs/BACKEND_PRD.md` |
+| CLI flags | `src/adh/cli.py` |
+| Config file | `examples/adh.yaml`, `src/adh/templates/adh.yaml`, `src/adh/config.py` (`YAML_TO_ADH`) |
+
+Checklist before merge:
+
+1. Field added/renamed in one surface → update all three (or document why N/A).
+2. `stop_reason` enum change → update `src/adh/report.py`, BACKEND_PRD, and OpenAPI enum test.
+3. New error code → add to `src/adh/errors.py` (`ERROR_CODES`) and BACKEND_PRD error table.
+4. Run `tests/test_config.py::test_config_field_names_match_humanize_request` and API/idempotency tests.
+
 ## Commit style
 
 This repository uses numbered commits of the form `#[n] Commit` on `main`. Feature branches may use clearer messages; the maintainer will squash or renumber if needed.

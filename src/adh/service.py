@@ -10,6 +10,7 @@ from adh.detectors.base import Detector, ScoreResult
 from adh.detectors.remote import assert_inner_loop_detector
 from adh.engine import EngineConfig, humanize
 from adh.factory import load_detector, load_gate, load_rewriter
+from adh.ids import new_report_id
 from adh.models import DEFAULT_MODEL
 from adh.report import RunReport
 from adh.rewriter import Rewriter
@@ -24,6 +25,7 @@ SERVICE_ONLY_HUMANIZE_FIELDS = frozenset(
         "models_dir",
         "semantic",
         "profile",
+        "metadata",
     }
 )
 
@@ -254,4 +256,4 @@ def run_humanize(
         semantic_gate=gate,
         hard_rewriter=guided,
         config=settings,
-    )
+    ).model_copy(update={"report_id": new_report_id()})

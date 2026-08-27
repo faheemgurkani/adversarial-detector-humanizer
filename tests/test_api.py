@@ -72,6 +72,7 @@ def test_score_unknown_detector() -> None:
     client = TestClient(app)
     response = client.post("/v1/score", json={"text": "Hello there world.", "detector": "nope"})
     assert response.status_code == 422
+    assert response.json()["error"]["code"] == "unknown_detector"
 
 
 def test_humanize_already_below_target() -> None:
@@ -81,6 +82,7 @@ def test_humanize_already_below_target() -> None:
         json={
             "text": "This is a human sentence.",
             "detector": "cue",
+            "compact": False,
             "allow_lexical_gate": True,
             "semantic": "lexical",
             "min_semantic_similarity": 0.2,
@@ -119,6 +121,7 @@ def test_humanize_pangram_stub_is_not_found_as_loop_detector() -> None:
         json={"text": "A reasonably long sentence for the stub.", "detector": "pangram"},
     )
     assert response.status_code == 501
+    assert response.json()["error"]["code"] == "remote_detector_unsupported"
 
 
 def test_sentences() -> None:

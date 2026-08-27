@@ -13,7 +13,9 @@ from rich.table import Table
 
 from adh.config import init_config_path, load_config, resolve_adh_config
 from adh.doctor import all_passed, run_checks
+from adh.errors import error_response
 from adh.exceptions import AdhError, InputError
+from adh.ids import new_request_id
 from adh.factory import load_detector, load_gate, load_rewriter
 from adh.models import DEFAULT_MODEL, fetch_models, list_models
 from adh.profiles import TRY_SAMPLE_TEXT
@@ -87,7 +89,11 @@ def _read_input(
     return sys.stdin.read()
 
 
-def _fail(error: Exception) -> None:
+def _fail(error: Exception, *, as_json: bool = False) -> None:
+    if as_json and isinstance(error, AdhError):
+        payload = {"error": error_response(error, new_request_id())}
+        typer.echo(json.dumps(payload, indent=2))
+        raise typer.Exit(code=1)
     err_console.print(f"[red]error:[/red] {error}")
     raise typer.Exit(code=1)
 
@@ -121,7 +127,7 @@ def score(
             models_dir=models_dir,
         )
     except AdhError as error:
-        _fail(error)
+        _fail(error, as_json=as_json)
         return
     if as_json:
         payload_json = {
@@ -193,7 +199,7 @@ def doctor(
         )
         results = run_checks(cfg)
     except AdhError as error:
-        _fail(error)
+        _fail(error, as_json=as_json)
         return
 
     if as_json:
@@ -371,7 +377,7 @@ def humanize_cmd(
             ),
         )
     except AdhError as error:
-        _fail(error)
+        _fail(error, as_json=as_json)
         return
 
     if output is not None:

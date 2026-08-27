@@ -125,6 +125,7 @@ class RunReport(BaseModel):
     semantic_similarity: float
     rounds: int
     stop_reason: StopReason
+    report_id: str | None = None
     sentences: list[SentenceReport] = Field(default_factory=list)
     locks: list[LockRecord] = Field(default_factory=list)
     flagged_count: int = 0

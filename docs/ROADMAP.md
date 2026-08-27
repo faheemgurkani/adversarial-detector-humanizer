@@ -353,10 +353,10 @@ Front-load naming contracts and package boundaries; they are painful to change a
 - [x] `adh try` (or documented one-liner) prints scores + stop_reason
 
 **Step 0b — IDs and errors (Stripe-style)**
-- [ ] `report_id` with `report_` prefix on every humanize response
-- [ ] `X-Request-Id` / `req_` on all HTTP responses
-- [ ] Error envelope: `code`, `message`, `retryable`, `doc_url`, `request_id`
-- [ ] Error code catalog started in BACKEND_PRD
+- [x] `report_id` with `report_` prefix on every humanize response
+- [x] `X-Request-Id` / `req_` on all HTTP responses
+- [x] Error envelope: `code`, `message`, `retryable`, `doc_url`, `request_id`
+- [x] Error code catalog started in BACKEND_PRD
 
 **Step 1 — Package boundary**
 - [x] `adh.engine`, `adh.report`, `adh.gates`, `adh.preserve` import no `fastapi`, `typer`, `httpx` (rewriter adapters excepted behind protocols)
@@ -378,12 +378,12 @@ Front-load naming contracts and package boundaries; they are painful to change a
 - [x] Exit 0 = ready; exit 1 = actionable fix list
 
 **Step 5 — Sync API polish**
-- [ ] `agent_hint` on compact response
-- [ ] Optional `metadata` on request/response
-- [ ] `Idempotency-Key` deduplicates humanize within TTL
-- [ ] OpenAPI documents all `stop_reason` values + error codes
-- [ ] API review checklist in CONTRIBUTING or ROADMAP §4a
-- [ ] BACKEND_PRD updated; semver policy written
+- [x] `agent_hint` on compact response
+- [x] Optional `metadata` on request/response
+- [x] `Idempotency-Key` deduplicates humanize within TTL
+- [x] OpenAPI documents all `stop_reason` values + error codes
+- [x] API review checklist in CONTRIBUTING or ROADMAP §4a
+- [x] BACKEND_PRD updated; semver policy written
 
 **Step 6 — Async jobs**
 - [ ] 202 on create; 200 + status body on poll (not 202 on GET)
