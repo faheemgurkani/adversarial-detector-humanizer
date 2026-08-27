@@ -368,10 +368,10 @@ Front-load naming contracts and package boundaries; they are painful to change a
 - [x] CLI cold start < 200ms on typical machine (no `pkg_resources`)
 
 **Step 3 — Config**
-- [ ] `adh init` writes `adh.yaml`
-- [ ] `adh humanize` reads config; CLI flags override file
-- [ ] `adh serve` loads same file from cwd or `ADH_CONFIG` path
-- [ ] Four profiles documented and tested
+- [x] `adh init` writes `adh.yaml`
+- [x] `adh humanize` reads config; CLI flags override file
+- [x] `adh serve` loads same file from cwd or `ADH_CONFIG` path
+- [x] Four profiles documented and tested
 
 **Step 4 — Doctor**
 - [ ] Checks: Python version, optional `[local]` torch, rewriter key/URL, model artifacts, Pangram key if verify configured

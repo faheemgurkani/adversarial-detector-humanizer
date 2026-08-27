@@ -32,6 +32,8 @@ input
 
 Plugins: `src/adh/registry.py` loads `adh.detectors`, `adh.rewriters`, and `adh.gates` via `importlib.metadata.entry_points`. `src/adh/factory.py` is a thin wrapper (policy such as `assert_inner_loop_detector` stays there).
 
+Project config: `adh.yaml` (or `ADH_CONFIG`) is loaded by `src/adh/config.py` and shared by CLI, HTTP, and profiles.
+
 ## Meaning gates
 
 `MeaningGateStack` (`gates/stack.py`) combines semantic similarity with mechanical vetoes: numerals, hedges, deletion, optional NLI entailment, optional role preservation, scaffolding checks.
