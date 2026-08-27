@@ -32,6 +32,7 @@ dependencies = [
   "pydantic>=2.8",
   "pysbd>=0.3.4",
   "python-dotenv>=1.0",
+  "pyyaml>=6.0",
   "rich>=13.7",
   "typer>=0.12",
 ]

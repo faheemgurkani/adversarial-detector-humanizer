@@ -61,8 +61,12 @@ _REQUEST_TO_ADH: dict[str, str] = {
 }
 
 
-def adh_config_from_request(request: HumanizeRequest) -> AdhConfig:
-    """Map an HTTP body onto AdhConfig, honoring ``profile`` plus explicit fields."""
+def adh_config_from_request(
+    request: HumanizeRequest,
+    *,
+    file: AdhConfig | None = None,
+) -> AdhConfig:
+    """Map an HTTP body onto AdhConfig, honoring file defaults and explicit fields."""
     values: dict[str, Any] = {
         "detector": request.detector,
         "device": request.device,
@@ -90,15 +94,22 @@ def adh_config_from_request(request: HumanizeRequest) -> AdhConfig:
         "prepass_max_paragraphs": request.prepass_max_paragraphs,
         "prepass_backend": request.prepass_backend,
     }
+    if request.profile is not None:
+        values["profile"] = request.profile
     explicit: set[str] = set()
     for field_name in request.model_fields_set:
-        if field_name in {"text", "compact", "profile"}:
+        if field_name in {"text", "compact"}:
+            continue
+        if field_name == "profile":
+            explicit.add("profile")
             continue
         explicit.add(_REQUEST_TO_ADH.get(field_name, field_name))
+    profile = request.profile if "profile" in request.model_fields_set else None
     return resolve_adh_config(
-        profile=request.profile,
+        profile=profile,
         values=values,
         explicit=explicit,
+        file=file,
     )
 
 
@@ -131,12 +142,14 @@ def _engine_from_adh(config: AdhConfig) -> EngineConfig:
 
 def build_engine_config(
     source: HumanizeRequest | AdhConfig | EngineConfig,
+    *,
+    file: AdhConfig | None = None,
 ) -> EngineConfig:
     """Normalize door input into the engine's config object."""
     if isinstance(source, EngineConfig):
         return source
     if isinstance(source, HumanizeRequest):
-        return _engine_from_adh(adh_config_from_request(source))
+        return _engine_from_adh(adh_config_from_request(source, file=file))
     return _engine_from_adh(source)
 
 
@@ -178,6 +191,7 @@ def run_humanize(
     text: str,
     *,
     config: AdhConfig | EngineConfig | HumanizeRequest | None = None,
+    file: AdhConfig | None = None,
     detector: Detector | None = None,
     rewriter: Rewriter | None = None,
     semantic_gate: SemanticGate | None = None,
@@ -189,7 +203,7 @@ def run_humanize(
     """Load adapters, build engine config, and run ``humanize()``."""
     adh: AdhConfig | None
     if isinstance(config, HumanizeRequest):
-        adh = adh_config_from_request(config)
+        adh = adh_config_from_request(config, file=file)
         settings = _engine_from_adh(adh)
     elif isinstance(config, EngineConfig):
         adh = None
