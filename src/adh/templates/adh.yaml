@@ -1,0 +1,27 @@
+# adh.yaml — canonical config (v1)
+profile: standard
+
+detector: qwen3-variable
+device: auto
+models_dir: null
+
+rewriter:
+  backend: openai
+  model: gpt-4o-mini
+
+humanize:
+  target_score: 30
+  verdict_score: 45
+  max_rounds: 5
+  sentence_threshold: 50
+  min_semantic_similarity: 0.88
+  max_rewrite_ratio: 0.4
+  best_of_n: 3
+  prepass: none
+  hard_mode: false
+
+verify:
+  detectors: []
+  threshold: 45
+
+deploy_detectors: []
