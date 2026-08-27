@@ -374,8 +374,8 @@ Front-load naming contracts and package boundaries; they are painful to change a
 - [x] Four profiles documented and tested
 
 **Step 4 — Doctor**
-- [ ] Checks: Python version, optional `[local]` torch, rewriter key/URL, model artifacts, Pangram key if verify configured
-- [ ] Exit 0 = ready; exit 1 = actionable fix list
+- [x] Checks: Python version, optional `[local]` torch, rewriter key/URL, model artifacts, Pangram key if verify configured
+- [x] Exit 0 = ready; exit 1 = actionable fix list
 
 **Step 5 — Sync API polish**
 - [ ] `agent_hint` on compact response

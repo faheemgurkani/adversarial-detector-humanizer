@@ -66,6 +66,7 @@ The engine always returns a report with the best intermediate text.
 |---------|--------|-------|
 | Library | `adh.engine.humanize` | Engine directly |
 | Service | `adh.service` | factory + `engine.humanize` |
+| Config | `adh.config` | `adh.yaml`, profiles, merge overrides |
 | CLI | `adh.cli` | `service.run_humanize` / `run_score` |
 | HTTP | `adh.api` | `service.run_humanize` / `run_score` |
 

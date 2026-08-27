@@ -11,7 +11,7 @@ import yaml
 
 from adh.exceptions import InputError
 from adh.models import DEFAULT_MODEL
-from adh.profiles import PROFILE_PRESETS, apply_profile, get_profile_preset
+from adh.profiles import PROFILE_PRESETS, get_profile_preset
 
 DEFAULT_CONFIG_FILENAME = "adh.yaml"
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "adh.yaml"
@@ -193,9 +193,16 @@ def config_from_mapping(data: dict[str, Any]) -> AdhConfig:
     return _from_mapping(merged)
 
 
-def load_config(path: Path | str | None = None, *, cwd: Path | None = None) -> AdhConfig | None:
+def load_config(
+    path: Path | str | None = None,
+    *,
+    cwd: Path | None = None,
+) -> AdhConfig | None:
     """Load adh.yaml if present. Returns ``None`` when no file is found."""
-    chosen = Path(path).expanduser().resolve() if path is not None else find_config_path(cwd=cwd)
+    if path is not None:
+        chosen = Path(path).expanduser().resolve()
+    else:
+        chosen = find_config_path(cwd=cwd)
     if chosen is None:
         return None
     return config_from_mapping(load_yaml_file(chosen))
@@ -253,10 +260,17 @@ def resolve_adh_config(
         merged.update(get_profile_preset(effective_profile))
         merged["profile"] = effective_profile
 
-    for key, value in file_data.items():
-        if key == "profile":
-            continue
-        merged[key] = value
+    skip_file = (
+        effective_profile is not None
+        and "profile" in explicit_set
+        and file_data.get("profile")
+        and str(file_data["profile"]) != effective_profile
+    )
+    if not skip_file:
+        for key, value in file_data.items():
+            if key == "profile":
+                continue
+            merged[key] = value
 
     chosen = explicit_set if effective_profile else explicit_set or set(values)
     for key, value in values.items():

@@ -30,6 +30,8 @@ def test_setup_doc_exists() -> None:
     assert "adh models fetch" in text
     assert "Try in 30 seconds" in text
     assert "adh try" in text
+    assert "adh init" in text
+    assert "adh doctor" in text
 
 
 def test_roadmap_doc_exists() -> None:

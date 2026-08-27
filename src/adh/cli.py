@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 from dotenv import find_dotenv, load_dotenv
@@ -13,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from adh.config import init_config_path, load_config, resolve_adh_config
+from adh.doctor import all_passed, run_checks
 from adh.exceptions import AdhError, InputError
 from adh.factory import load_detector, load_gate, load_rewriter
 from adh.models import DEFAULT_MODEL, fetch_models, list_models
@@ -70,8 +70,8 @@ _SERVE_TO_ADH = {
 
 
 def _read_input(
-    text: Optional[str],
-    file: Optional[Path],
+    text: str | None,
+    file: Path | None,
 ) -> str:
     provided = [value is not None for value in (text, file)]
     if sum(provided) > 1:
@@ -104,11 +104,11 @@ def _option_from_command_line(ctx: typer.Context, name: str) -> bool:
 
 @app.command()
 def score(
-    text: Optional[str] = typer.Option(None, "--text", help="Text to score."),
-    file: Optional[Path] = typer.Option(None, "--file", exists=False, help="UTF-8 file to score."),
+    text: str | None = typer.Option(None, "--text", help="Text to score."),
+    file: Path | None = typer.Option(None, "--file", exists=False, help="UTF-8 file to score."),
     detector: str = typer.Option(DEFAULT_MODEL, "--detector", help="Detector name."),
     device: str = typer.Option("auto", "--device", help="auto, cpu, cuda, or mps."),
-    models_dir: Optional[Path] = typer.Option(None, "--models-dir", help="Local model directory."),
+    models_dir: Path | None = typer.Option(None, "--models-dir", help="Local model directory."),
     as_json: bool = typer.Option(False, "--json", help="Print a JSON object."),
 ) -> None:
     """Score text with a local detector. Does not rewrite."""
@@ -148,7 +148,7 @@ def score(
 @app.command()
 def init(
     force: bool = typer.Option(False, "--force", help="Overwrite an existing adh.yaml."),
-    path: Optional[Path] = typer.Option(
+    path: Path | None = typer.Option(
         None,
         "--path",
         help="Directory to write adh.yaml (default: current directory).",
@@ -165,13 +165,62 @@ def init(
 
 
 @app.command()
+def doctor(
+    ctx: typer.Context,
+    profile: str | None = typer.Option(
+        None,
+        "--profile",
+        help="Override profile from adh.yaml for this check.",
+    ),
+    config_path: Path | None = typer.Option(
+        None,
+        "--config",
+        help="Path to adh.yaml (default: cwd or ADH_CONFIG).",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Print machine-readable results."),
+) -> None:
+    """Validate setup for the configured profile before humanize or CI."""
+    try:
+        file_cfg = load_config(config_path)
+        explicit: set[str] = set()
+        if _option_from_command_line(ctx, "profile") and profile is not None:
+            explicit.add("profile")
+        cfg = resolve_adh_config(
+            profile=profile if explicit else None,
+            values={"profile": profile} if profile is not None else {},
+            explicit=explicit,
+            file=file_cfg,
+        )
+        results = run_checks(cfg)
+    except AdhError as error:
+        _fail(error)
+        return
+
+    if as_json:
+        typer.echo(json.dumps([item.to_dict() for item in results], indent=2))
+    else:
+        table = Table(title="ADH doctor")
+        table.add_column("check")
+        table.add_column("status")
+        table.add_column("message", overflow="fold")
+        table.add_column("fix", overflow="fold")
+        for item in results:
+            status = "skip" if item.skipped else ("ok" if item.ok else "FAIL")
+            table.add_row(item.name, status, item.message, item.fix or "")
+        console.print(table)
+
+    if not all_passed(results):
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def serve(
     ctx: typer.Context,
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8000, "--port", min=1, max=65535),
     detector: str = typer.Option("fake", "--detector", help="Bound detector for this process."),
     device: str = typer.Option("auto", "--device"),
-    models_dir: Optional[Path] = typer.Option(None, "--models-dir"),
+    models_dir: Path | None = typer.Option(None, "--models-dir"),
     semantic: str = typer.Option("lexical", "--semantic"),
     allow_lexical: bool = typer.Option(True, "--allow-lexical-gate/--no-allow-lexical-gate"),
 ) -> None:
@@ -236,16 +285,16 @@ def try_cmd() -> None:
 @app.command("humanize")
 def humanize_cmd(
     ctx: typer.Context,
-    text: Optional[str] = typer.Option(None, "--text", help="Text to humanize."),
-    file: Optional[Path] = typer.Option(None, "--file", help="UTF-8 file to humanize."),
-    profile: Optional[str] = typer.Option(
+    text: str | None = typer.Option(None, "--text", help="Text to humanize."),
+    file: Path | None = typer.Option(None, "--file", help="UTF-8 file to humanize."),
+    profile: str | None = typer.Option(
         None,
         "--profile",
         help="Preset bundle. Use 'fast' for zero-key test mode.",
     ),
     detector: str = typer.Option(DEFAULT_MODEL, "--detector", help="Detector name."),
     device: str = typer.Option("auto", "--device"),
-    models_dir: Optional[Path] = typer.Option(None, "--models-dir"),
+    models_dir: Path | None = typer.Option(None, "--models-dir"),
     target: float = typer.Option(30.0, "--target", min=0.0, max=100.0),
     verdict: float = typer.Option(45.0, "--verdict-score", min=0.0, max=100.0),
     max_rounds: int = typer.Option(5, "--max-rounds", min=1, max=20),
@@ -253,7 +302,7 @@ def humanize_cmd(
     min_semantic: float = typer.Option(0.88, "--min-semantic"),
     max_rewrite_ratio: float = typer.Option(0.4, "--max-rewrite-ratio"),
     best_of: int = typer.Option(3, "--best-of", min=1, max=8),
-    verify: Optional[str] = typer.Option(None, "--verify", help="Comma-separated pangram,gptzero."),
+    verify: str | None = typer.Option(None, "--verify", help="Comma-separated pangram,gptzero."),
     verify_threshold: float = typer.Option(45.0, "--verify-threshold"),
     meaning_gate: str = typer.Option("auto", "--meaning-gate", help="auto, minilm, lexical, or full."),
     deploy_detector: list[str] = typer.Option([], "--deploy-detector", help="Held-out deploy detector(s)."),
@@ -264,7 +313,7 @@ def humanize_cmd(
     prepass_max_paragraphs: int = typer.Option(2, "--prepass-max-paragraphs", min=0, max=10),
     prepass_backend: str = typer.Option("llm", "--prepass-backend", help="llm or google."),
     enable_logprob_blend: bool = typer.Option(True, "--logprob-blend/--no-logprob-blend"),
-    rewriter_model: Optional[str] = typer.Option(None, "--rewriter-model"),
+    rewriter_model: str | None = typer.Option(None, "--rewriter-model"),
     semantic: str = typer.Option("auto", "--semantic", help="auto, minilm, or lexical."),
     allow_lexical: bool = typer.Option(
         False,
@@ -272,7 +321,7 @@ def humanize_cmd(
         help="Allow the lexical fallback when MiniLM is not installed.",
     ),
     as_json: bool = typer.Option(False, "--json", help="Print a RunReport JSON object."),
-    output: Optional[Path] = typer.Option(None, "--output", help="Write rewritten text here."),
+    output: Path | None = typer.Option(None, "--output", help="Write rewritten text here."),
 ) -> None:
     """Rewrite only flagged sentences until the detector score drops or rounds end."""
     try:
@@ -360,7 +409,7 @@ def humanize_cmd(
 
 @models_app.command("list")
 def models_list(
-    models_dir: Optional[Path] = typer.Option(None, "--models-dir"),
+    models_dir: Path | None = typer.Option(None, "--models-dir"),
 ) -> None:
     """Show published detectors and whether local artifacts are ready."""
     table = Table(title="Local Raschka detectors")
@@ -376,8 +425,8 @@ def models_list(
 
 @models_app.command("fetch")
 def models_fetch(
-    model: Optional[str] = typer.Option(None, "--model", help="Fetch one model. Default: all."),
-    models_dir: Optional[Path] = typer.Option(None, "--models-dir"),
+    model: str | None = typer.Option(None, "--model", help="Fetch one model. Default: all."),
+    models_dir: Path | None = typer.Option(None, "--models-dir"),
 ) -> None:
     """Download published weights from the Hugging Face Hub."""
     try:

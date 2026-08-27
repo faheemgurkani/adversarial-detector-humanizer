@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import fields
-from pathlib import Path
 
 import yaml
 from fastapi.testclient import TestClient
@@ -141,7 +139,6 @@ def test_humanize_uses_yaml_without_repeating_flags(tmp_path, monkeypatch) -> No
 def test_serve_loads_same_config(tmp_path, monkeypatch) -> None:
     config_file = tmp_path / "adh.yaml"
     config_file.write_text("profile: fast\ndetector: fake\n", encoding="utf-8")
-    monkeypatch.setenv("ADH_CONFIG", str(config_file))
     application = create_app(config_path=config_file)
     client = TestClient(application)
     response = client.get("/health")

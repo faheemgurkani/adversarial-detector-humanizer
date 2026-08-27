@@ -19,6 +19,24 @@ adh humanize --profile fast --text "Furthermore, note this." --json
 
 Both work with an empty `.env`.
 
+## Project config
+
+```bash
+adh init
+# edit adh.yaml (profile: fast | standard | quality | verify-only)
+adh humanize --file draft.txt --json
+```
+
+CLI flags and HTTP JSON fields override `adh.yaml`. Set `ADH_CONFIG=/path/to/adh.yaml` for a custom file location.
+
+Before switching to a production profile, run a pre-flight check:
+
+```bash
+adh init
+adh doctor          # exit 0 = ready for the configured profile
+adh doctor --json   # machine-readable output for CI
+```
+
 **Product roadmap** (config file, Docker, MCP, agents): [ROADMAP.md](ROADMAP.md).
 
 Python **3.11** is the supported version for this repository. Python 3.12 usually works; 3.10 does not.
@@ -113,6 +131,40 @@ Edit `.env` and set at least the rewriter values you will use. The CLI loads `.e
 Provider snippets are commented in `.env.example`.
 
 `adh score` with `--detector fake` does **not** need a rewriter key. Neither does `adh try` / `adh humanize --profile fast`.
+
+## Pre-flight: `adh doctor`
+
+`adh doctor` reads `adh.yaml` (or `ADH_CONFIG`) and checks whether your **configured profile** can run without mid-loop failures.
+
+```bash
+adh doctor
+adh doctor --profile standard
+adh doctor --json || exit 1   # CI gate
+```
+
+| Check | When it runs | Pass condition |
+|---|---|---|
+| `python_version` | Always | Python ≥ 3.11 |
+| `detector_registry` / `rewriter_registry` | Always | Names exist in the plugin registry |
+| `rewriter` / `rewriter_api_key` | Profile uses `identity` vs `openai` | Identity skips; OpenAI needs `OPENAI_API_KEY` or a local `OPENAI_BASE_URL` |
+| `local_torch` | Local Raschka detector (`standard`, `quality`, …) | `torch` import succeeds (`[local]` extra) |
+| `local_model_*` | Same as above | Weights present under `models_dir` |
+| `models_directory` | Local detector configured | Cache path exists and is writable |
+| `verify_keys` | `verify.detectors` non-empty in yaml | Matching `PANGRAM_API_KEY` / `GPTZERO_API_KEY` set |
+
+**Profile `fast`:** all green with no API keys and no model downloads.
+
+**Profile `standard` without keys:** `rewriter_api_key` fails with an actionable fix pointing back to this guide.
+
+Common fixes:
+
+| Failed check | Fix |
+|---|---|
+| `rewriter_api_key` | Set `OPENAI_API_KEY` in `.env`, or point `OPENAI_BASE_URL` at localhost |
+| `local_torch` | `pip install -e ".[local]"` |
+| `local_model_qwen3-variable` | `adh models fetch --model qwen3-variable` |
+| `verify_keys` | Add `PANGRAM_API_KEY` / `GPTZERO_API_KEY` to `.env` |
+| `models_directory` | Fix permissions or set `ADH_MODELS_DIR` |
 
 ## 4. Download a local detector (optional)
 

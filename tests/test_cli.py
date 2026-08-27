@@ -13,6 +13,7 @@ def test_help() -> None:
     assert "humanize" in result.stdout
     assert "score" in result.stdout
     assert "try" in result.stdout
+    assert "doctor" in result.stdout
 
 
 def test_models_list() -> None:

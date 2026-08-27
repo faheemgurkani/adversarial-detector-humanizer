@@ -20,7 +20,7 @@ from adh.exceptions import (
     SemanticBackendError,
 )
 from adh.factory import load_detector, load_gate, load_rewriter
-from adh.models import DEFAULT_MODEL, list_models
+from adh.models import list_models
 from adh.report import RunReport
 from adh.rewriter import Rewriter
 from adh.schemas import (
@@ -79,8 +79,9 @@ def create_app(
             "Install extras: pip install 'adversarial-detector-humanizer[api]'"
         ) from error
 
+    file_cfg = load_config(config_path)
     if server_config is None:
-        server_config = load_config(config_path) or AdhConfig()
+        server_config = file_cfg or AdhConfig()
 
     resolved_detector = default_detector or server_config.detector
     resolved_device = device or server_config.device
@@ -100,11 +101,12 @@ def create_app(
     application.state.rewriter = rewriter
     application.state.semantic_gate = semantic_gate
     application.state.server_config = server_config
+    application.state.file_config = file_cfg
     application.state.default_detector = resolved_detector
     application.state.device = resolved_device
     application.state.models_dir = resolved_models_dir
 
-    if detector is None or rewriter is None or semantic_gate is None:
+    if file_cfg is not None or config_path is not None:
         try:
             if detector is None:
                 application.state.detector = load_detector(
@@ -178,7 +180,7 @@ def create_app(
             report = run_humanize(
                 payload.text,
                 config=payload,
-                file=application.state.server_config,
+                file=application.state.file_config,
                 detector=application.state.detector,
                 rewriter=application.state.rewriter,
                 semantic_gate=application.state.semantic_gate,
