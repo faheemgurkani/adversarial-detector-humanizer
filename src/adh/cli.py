@@ -12,9 +12,9 @@ from dotenv import find_dotenv, load_dotenv
 from rich.console import Console
 from rich.table import Table
 
-from adh.config import resolve_adh_config
+from adh.config import init_config_path, load_config, resolve_adh_config
 from adh.exceptions import AdhError, InputError
-from adh.factory import load_detector, load_gate
+from adh.factory import load_detector, load_gate, load_rewriter
 from adh.models import DEFAULT_MODEL, fetch_models, list_models
 from adh.profiles import TRY_SAMPLE_TEXT
 from adh.report import score_to_label
@@ -33,6 +33,7 @@ console = Console()
 err_console = Console(stderr=True)
 
 _CLI_TO_ADH = {
+    "profile": "profile",
     "detector": "detector",
     "device": "device",
     "models_dir": "models_dir",
@@ -57,6 +58,14 @@ _CLI_TO_ADH = {
     "prepass_max_paragraphs": "prepass_max_paragraphs",
     "prepass_backend": "prepass_backend",
     "enable_logprob_blend": "enable_logprob_blend",
+}
+
+_SERVE_TO_ADH = {
+    "detector": "detector",
+    "device": "device",
+    "models_dir": "models_dir",
+    "semantic": "semantic",
+    "allow_lexical": "allow_lexical_gate",
 }
 
 
@@ -137,7 +146,27 @@ def score(
 
 
 @app.command()
+def init(
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing adh.yaml."),
+    path: Optional[Path] = typer.Option(
+        None,
+        "--path",
+        help="Directory to write adh.yaml (default: current directory).",
+    ),
+) -> None:
+    """Write a starter adh.yaml in the current directory."""
+    try:
+        destination = path or Path.cwd()
+        written = init_config_path(destination, force=force)
+    except AdhError as error:
+        _fail(error)
+        return
+    console.print(f"wrote {written}")
+
+
+@app.command()
 def serve(
+    ctx: typer.Context,
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8000, "--port", min=1, max=65535),
     detector: str = typer.Option("fake", "--detector", help="Bound detector for this process."),
@@ -155,14 +184,34 @@ def serve(
     try:
         from adh.api import create_app
 
-        loaded = load_detector(detector, models_dir=models_dir, device=device)
-        gate = load_gate(prefer=semantic, allow_lexical=allow_lexical)
+        file_cfg = load_config()
+        explicit = {
+            adh_name
+            for cli_name, adh_name in _SERVE_TO_ADH.items()
+            if _option_from_command_line(ctx, cli_name)
+        }
+        cfg = resolve_adh_config(
+            values={
+                "detector": detector,
+                "device": device,
+                "models_dir": models_dir,
+                "semantic": semantic,
+                "allow_lexical_gate": allow_lexical,
+            },
+            explicit=explicit,
+            file=file_cfg,
+        )
+        loaded = load_detector(cfg.detector, models_dir=cfg.models_dir, device=cfg.device)
+        gate = load_gate(prefer=cfg.semantic, allow_lexical=cfg.allow_lexical_gate)
+        writer = load_rewriter(name=cfg.rewriter, model=cfg.rewriter_model)
         application = create_app(
             detector=loaded,
+            rewriter=writer,
             semantic_gate=gate,
-            default_detector=detector,
-            device=device,
-            models_dir=models_dir,
+            server_config=cfg,
+            default_detector=cfg.detector,
+            device=cfg.device,
+            models_dir=cfg.models_dir,
         )
     except AdhError as error:
         _fail(error)
@@ -262,9 +311,15 @@ def humanize_cmd(
             for cli_name, adh_name in _CLI_TO_ADH.items()
             if _option_from_command_line(ctx, cli_name)
         }
+        file_cfg = load_config()
         report = run_humanize(
             payload,
-            config=resolve_adh_config(profile=profile, values=values, explicit=explicit),
+            config=resolve_adh_config(
+                profile=profile if _option_from_command_line(ctx, "profile") else None,
+                values=values,
+                explicit=explicit,
+                file=file_cfg,
+            ),
         )
     except AdhError as error:
         _fail(error)
