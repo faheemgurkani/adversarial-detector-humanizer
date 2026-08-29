@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -130,6 +131,25 @@ class StructuredErrorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     error: StructuredError
+
+
+class JobCreateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    status: Literal["pending"] = "pending"
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class JobResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    status: Literal["pending", "processing", "done", "failed"]
+    metadata: dict[str, str] = Field(default_factory=dict)
+    report_id: str | None = None
+    report: dict[str, Any] | None = None
+    error: StructuredError | None = None
 
 
 class ErrorBody(BaseModel):

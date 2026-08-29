@@ -24,6 +24,8 @@ from adh.exceptions import (
 from adh.factory import load_detector, load_gate, load_rewriter
 from adh.idempotency import IdempotencyStore
 from adh.ids import new_request_id
+from adh.jobs.store import JobStore
+from adh.jobs.worker import JobWorker, build_humanize_handler
 from adh.models import list_models
 from adh.report import RunReport, StopReason
 from adh.rewriter import Rewriter
@@ -31,6 +33,8 @@ from adh.schemas import (
     CompactHumanizeResponse,
     HealthResponse,
     HumanizeRequest,
+    JobCreateResponse,
+    JobResponse,
     ScoreRequest,
     ScoreResponse,
     SentenceSplitRequest,
@@ -93,6 +97,9 @@ def create_app(
     device: str | None = None,
     models_dir: Path | str | None = None,
     idempotency_store: IdempotencyStore | None = None,
+    job_store: JobStore | None = None,
+    job_worker: JobWorker | None = None,
+    start_job_worker: bool = True,
 ) -> Any:
     """Build the ASGI app. Tests inject fakes; CLI injects loaded adapters."""
     try:
