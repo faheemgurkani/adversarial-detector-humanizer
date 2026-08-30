@@ -35,11 +35,14 @@ The closed loop in `src/adh/engine.py` is implemented and tested:
 | Structural translation prepass (flagged paragraphs) | Done | `prepass/` |
 | Statistical detector + `ensemble-local` | Done | `detectors/statistical.py`, `factory.py` |
 | Rewriter history carry-over (multi-round) | Done | `rewriter.py`, `engine.py` |
-| CLI (`score`, `humanize`, `serve`, `models`) | Done | `cli.py` |
-| HTTP API (`/v1/score`, `/v1/humanize`, …) | Done | `api.py` |
+| CLI (`score`, `humanize`, `serve`, `init`, `doctor`, `try`, `models`) | Done | `cli.py` |
+| HTTP API (sync + async jobs, idempotency, structured errors) | Done | `api.py`, `jobs/` |
+| Config file + profiles + `adh doctor` | Done | `config.py`, `profiles.py`, `doctor.py` |
+| Plugin registry (`entry_points`) | Done | `registry.py` |
+| Service layer (CLI ≡ HTTP) | Done | `service.py` |
 | Benchmark harness | Done | `scripts/benchmark.py`, `docs/BENCHMARK.md` |
 
-**Product shell gaps (this roadmap):** monolithic package, no config file, hardcoded factory registry, sync-only HTTP, no Docker, no MCP, no SDK, no `adh doctor`.
+**Product shell (Steps 0–6 done):** unified config (`adh.yaml`), plugin registry, service layer, `adh doctor`, Stripe-style HTTP contract (IDs, structured errors, idempotency), async jobs. **Remaining:** Docker, MCP, SDK — see [§9 Build order](#9-build-order).
 
 Reference clones for research live under `docs/resources/` (gitignored). See [resources/README.md](resources/README.md).
 
@@ -386,10 +389,10 @@ Front-load naming contracts and package boundaries; they are painful to change a
 - [x] BACKEND_PRD updated; semver policy written
 
 **Step 6 — Async jobs**
-- [ ] 202 on create; 200 + status body on poll (not 202 on GET)
-- [ ] `job_id` prefixed `job_`; links to `report_id`
-- [ ] Idempotency on job create
-- [ ] Failed jobs use same structured `error` envelope as sync routes
+- [x] 202 on create; 200 + status body on poll (not 202 on GET)
+- [x] `job_id` prefixed `job_`; links to `report_id`
+- [x] Idempotency on job create
+- [x] Failed jobs use same structured `error` envelope as sync routes
 
 **Step 7 — Docker**
 - [ ] `Dockerfile` with `[api,local]` optional GPU variant

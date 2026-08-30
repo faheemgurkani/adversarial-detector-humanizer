@@ -1,5 +1,7 @@
 # Contributing
 
+Backend-first open-core project. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for layer boundaries before adding features.
+
 ## Environment
 
 Full install, extras, and `.env` notes: [docs/SETUP.md](docs/SETUP.md).
@@ -18,11 +20,11 @@ Install `[local]` only when you need Raschka model inference or MiniLM. Do not t
 ## Workflow
 
 1. Open an issue for anything larger than a typo.
-2. Keep the engine library-first. The CLI should stay a thin wrapper around `humanize()` / `score()`.
+2. Keep the engine library-first. CLI and HTTP must call `service.run_humanize()` / `run_score()` — not duplicate adapter wiring.
 3. Do not add regex phrase-swappers or silent fallbacks when a rewriter key is missing.
 4. Do not call Pangram or GPTZero inside the inner loop.
 5. Add tests for edge cases (empty input, lock restoration, meaning drift, max rounds).
-6. HTTP routes live in `src/adh/api.py` and must stay covered by `tests/test_api.py`. Contract: `docs/BACKEND_PRD.md`.
+6. HTTP routes live in `src/adh/api.py` and must stay covered by `tests/test_api.py` and `tests/test_jobs.py`. Contract: `docs/BACKEND_PRD.md`.
 7. Run `python -m pytest` before you open a pull request.
 
 ## API review gate

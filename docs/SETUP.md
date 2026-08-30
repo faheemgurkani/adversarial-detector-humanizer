@@ -1,6 +1,8 @@
 # Setup
 
-This is the setup guide for the open-core CLI, library, and local HTTP API.
+Backend setup for the open-core CLI, HTTP API, and async job worker. This project treats **configuration, pre-flight checks, and API contract** as first-class product surfaces — not afterthoughts.
+
+See also: [ARCHITECTURE.md](ARCHITECTURE.md) (system layers) · [BACKEND_PRD.md](BACKEND_PRD.md) (HTTP contract).
 
 ## Try in 30 seconds
 
@@ -250,7 +252,25 @@ adh serve --host 127.0.0.1 --port 8000 --detector fake --semantic lexical
 
 Open `http://127.0.0.1:8000/docs`. Route contract: [BACKEND_PRD.md](BACKEND_PRD.md).
 
-Humanize routes still need the rewriter env vars unless the request uses `"profile": "fast"`.
+Humanize routes need rewriter env vars unless the request uses `"profile": "fast"`.
+
+**Sync** — `POST /v1/humanize` (compact by default). Send `Idempotency-Key` to deduplicate retries.
+
+**Async** — for long documents or agent tool timeouts:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/jobs/humanize \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "Your draft here.", "profile": "fast"}'
+# → 202, job_id, Location header
+
+curl -s http://127.0.0.1:8000/v1/jobs/job_…
+# → poll until status is done or failed
+```
+
+CLI equivalent: `adh humanize --async --profile fast --text "..." --json`
+
+Set `ADH_CONFIG=/path/to/adh.yaml` when serving so the process reads the same config as CLI.
 
 ## 7. Tests
 

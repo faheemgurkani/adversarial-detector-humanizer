@@ -2,9 +2,9 @@
 
 Open-core HTTP and library contract for `adversarial-detector-humanizer`.
 
-The ASGI app in `src/adh/api.py` is a thin wrapper around `adh.engine.humanize`. A later hosted SaaS must keep calling this engine. It must not reimplement the loop in another language.
+The ASGI app in `src/adh/api.py` is a thin wrapper around `adh.service.run_humanize()` — the same use-case layer as the CLI. A hosted SaaS must keep calling this service path. It must not reimplement the loop in another language.
 
-**Planned product changes** (async jobs, config file, MCP, prefixed IDs, idempotency, Stripe/Ollama interface discipline): [ROADMAP.md](ROADMAP.md). This document describes the **current** `/v1` contract; additive fields are preferred over breaking changes.
+**Scope:** sync `/v1/humanize`, async `/v1/jobs/*`, idempotency, prefixed IDs, structured errors, profiles, and metadata. **Planned:** MCP, SDK, Docker — [ROADMAP.md](ROADMAP.md). Additive fields are preferred over breaking changes; breaking changes require `/v2`.
 
 Positioning: **verified score reduction**. Local detector scores are proxies. This API does not guarantee a Pangram, GPTZero, or Turnitin pass.
 
@@ -257,6 +257,34 @@ Tested: `test_humanize_already_below_target`, `test_humanize_compact_and_loop`, 
 
 ---
 
+### `POST /v1/jobs/humanize`
+
+Async humanize using the same request body as sync humanize.
+
+**202**
+
+```json
+{
+  "job_id": "job_a1b2c3d4e5f67890",
+  "status": "pending",
+  "metadata": {"ticket": "JIRA-123"}
+}
+```
+
+Header: `Location: /v1/jobs/{job_id}`. Supports `Idempotency-Key` on create.
+
+### `GET /v1/jobs/{job_id}`
+
+Poll job status. Known jobs always return **200** (`pending`, `processing`, `done`, `failed`).
+
+When `status` is `done`, response includes `report_id` and nested compact `report` (same shape as sync compact humanize). When `failed`, includes structured `error`.
+
+CLI: `adh humanize --async --profile fast --text "..."`.
+
+Tested: `tests/test_jobs.py`.
+
+---
+
 ### `POST /v1/sentences`
 
 Offset-preserving sentence split (`pysbd`). Used by the engine and later Chrome highlighting.
@@ -326,6 +354,7 @@ Documented in [ROADMAP.md](ROADMAP.md). Not implemented in the open-core server.
 |-----|------|
 | `adh score` | `POST /v1/score` |
 | `adh humanize` | `POST /v1/humanize` |
+| `adh humanize --async` | `POST /v1/jobs/humanize` + poll `GET /v1/jobs/{job_id}` |
 | `adh models list` | `GET /v1/models` |
 | `adh serve` | process hosting the routes above |
 

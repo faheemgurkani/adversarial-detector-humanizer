@@ -16,11 +16,12 @@ from adh.doctor import all_passed, run_checks
 from adh.errors import error_response
 from adh.exceptions import AdhError, InputError
 from adh.ids import new_request_id
+from adh.jobs.runner import execute_humanize_job
 from adh.factory import load_detector, load_gate, load_rewriter
 from adh.models import DEFAULT_MODEL, fetch_models, list_models
 from adh.profiles import TRY_SAMPLE_TEXT
 from adh.report import score_to_label
-from adh.service import run_humanize, run_score
+from adh.service import run_humanize, run_score, humanize_request_from_config
 
 load_dotenv(find_dotenv(usecwd=True))
 
@@ -327,6 +328,11 @@ def humanize_cmd(
         help="Allow the lexical fallback when MiniLM is not installed.",
     ),
     as_json: bool = typer.Option(False, "--json", help="Print a RunReport JSON object."),
+    async_mode: bool = typer.Option(
+        False,
+        "--async",
+        help="Run humanize as a background job and wait for the result.",
+    ),
     output: Path | None = typer.Option(None, "--output", help="Write rewritten text here."),
 ) -> None:
     """Rewrite only flagged sentences until the detector score drops or rounds end."""
@@ -367,14 +373,64 @@ def humanize_cmd(
             if _option_from_command_line(ctx, cli_name)
         }
         file_cfg = load_config()
+        resolved = resolve_adh_config(
+            profile=profile if _option_from_command_line(ctx, "profile") else None,
+            values=values,
+            explicit=explicit,
+            file=file_cfg,
+        )
+        if async_mode:
+            humanize_request = humanize_request_from_config(
+                payload,
+                resolved,
+                compact=not as_json,
+            )
+            record = execute_humanize_job(
+                humanize_request,
+                context={
+                    "file_config": file_cfg,
+                    "detector": None,
+                    "rewriter": None,
+                    "semantic_gate": None,
+                    "default_detector": detector,
+                    "device": device,
+                    "models_dir": models_dir,
+                },
+            )
+            if record.status == "failed":
+                if as_json:
+                    typer.echo(
+                        json.dumps(
+                            {
+                                "job_id": record.job_id,
+                                "status": record.status,
+                                "error": record.error,
+                            },
+                            indent=2,
+                        )
+                    )
+                else:
+                    message = (record.error or {}).get("message", "job failed")
+                    err_console.print(f"[red]error:[/red] {message}")
+                raise typer.Exit(code=1)
+            report_payload = record.report or {}
+            if output is not None:
+                output.write_text(str(report_payload.get("output_text", "")), encoding="utf-8")
+            if as_json:
+                typer.echo(
+                    json.dumps(
+                        {"job_id": record.job_id, "status": record.status, **report_payload},
+                        indent=2,
+                    )
+                )
+                return
+            console.print(f"job: {record.job_id}")
+            console.print(str(report_payload.get("output_text", "")))
+            return
+
         report = run_humanize(
             payload,
-            config=resolve_adh_config(
-                profile=profile if _option_from_command_line(ctx, "profile") else None,
-                values=values,
-                explicit=explicit,
-                file=file_cfg,
-            ),
+            config=resolved,
         )
     except AdhError as error:
         _fail(error, as_json=as_json)

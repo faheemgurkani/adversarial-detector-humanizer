@@ -1,92 +1,125 @@
 # adversarial-detector-humanizer
 
-Detector-verified, sentence-targeted, meaning-preserving text humanizer.
+**Detector-verified, sentence-targeted, meaning-preserving text humanizer** — built as an open-core **backend engine** with a production-minded product shell.
 
-This is an **open-core engine and backend utility**, not a one-shot paraphraser. It scores text, rewrites only the sentences a detector flags, locks facts and citations, and rejects candidates that drift in meaning. It reports before/after scores. It does **not** guarantee that any commercial detector will call the result human.
+This is not a paraphrasing API bolted onto a script. It is a **layered backend system**: a pure rewrite loop at the center, a shared service layer, plugin registries, unified configuration, and thin transport adapters (CLI, HTTP, jobs). Humans, agents, CI, and future MCP clients all hit the same execution path.
 
-> Verified score reduction — we show before/after, no bypass guarantees.
+> **Verified score reduction** — we show before/after scores. No bypass guarantees.
 
-**Transformation plan (CLI + API + agents + Docker):** [docs/ROADMAP.md](docs/ROADMAP.md)
+| Doc | Purpose |
+|-----|---------|
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Transformation plan and build order |
+| [docs/BACKEND_PRD.md](docs/BACKEND_PRD.md) | Frozen `/v1` HTTP contract |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Engine loop, modules, boundaries |
+| [docs/SETUP.md](docs/SETUP.md) | Install, env, profiles, doctor |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | API review gate and workflow |
 
-**Try in 30 seconds** (no API key, no model download): [docs/SETUP.md](docs/SETUP.md#try-in-30-seconds)
+**Try in 30 seconds** (no API key, no model download):
 
 ```bash
 python -m pip install -e ".[dev]"
 adh try
 ```
 
-## What it does
+---
+
+## Backend system design
+
+The product follows a single rule: **one library, many doors**. Business logic lives once; transports parse input and format output.
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  Doors (thin adapters)                                               │
+│  Typer CLI · FastAPI sync · FastAPI async jobs · Python import         │
+└───────────────────────────────┬──────────────────────────────────────┘
+                                │  AdhConfig / HumanizeRequest in
+                                │  RunReport / compact JSON out
+┌───────────────────────────────▼──────────────────────────────────────┐
+│  Product shell                                                       │
+│  config.py   adh.yaml + profiles + override precedence                 │
+│  service.py  run_humanize() / run_score() — single use-case layer    │
+│  doctor.py   config-aware pre-flight checks                          │
+│  jobs/       async queue + worker → same service                     │
+│  idempotency.py · ids.py · errors.py  Stripe-style HTTP discipline   │
+└───────────────────────────────┬──────────────────────────────────────┘
+                                │
+┌───────────────────────────────▼──────────────────────────────────────┐
+│  Engine (pure)                                                       │
+│  engine.humanize() · gates · preserve-lock · report types            │
+│  No FastAPI, Typer, or env reads in the core loop                    │
+└───────────────────────────────┬──────────────────────────────────────┘
+                                │  protocols
+┌───────────────────────────────▼──────────────────────────────────────┐
+│  Plugins (importlib.metadata entry_points)                           │
+│  adh.detectors · adh.rewriters · adh.gates                             │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Design decisions (why it is built this way)
+
+| Concern | Approach |
+|---------|----------|
+| **Config drift** | One shape everywhere: `adh.yaml`, CLI flags, HTTP JSON, profiles — merged via `resolve_adh_config()` with explicit override precedence |
+| **Surface drift** | CLI and HTTP call `service.run_humanize()`, not duplicate wiring |
+| **Plugin extensibility** | Detectors/rewriters/gates register via `pyproject.toml` entry points; `registry.load_plugin()` constructs them |
+| **Agent integrations** | Compact-by-default HTTP responses, `agent_hint`, `metadata`, prefixed IDs (`report_`, `job_`, `req_`) |
+| **Retries** | `Idempotency-Key` on sync humanize and async job create — same body → same result, no double spend |
+| **Long runs** | `POST /v1/jobs/humanize` → 202 + poll `GET /v1/jobs/{id}` — worker calls the same service as sync |
+| **Operability** | `adh doctor` reads your config and returns actionable fixes before production profiles |
+| **Errors** | Structured `{ error: { code, message, retryable, doc_url, request_id } }` — not bare strings |
+
+Local detector scores are **proxies**. They correlate with commercial tools; they are not Pangram, GPTZero, or Turnitin verdicts.
+
+---
+
+## What the engine does
 
 ```
 Score → flag sentences → preserve-lock facts → register-shift rewrite
       → restore locks → meaning gates → re-score → repeat
 ```
 
-- **Detector-guided loop** rather than a blind full rewrite
-- **Register/style shift** (rhythm, transitions, hedging) rather than synonym maps
-- **Preserve-lock** for numbers, URLs, emails, DOIs, quotes, code, acronyms, names
-- **Meaning gate stack** so facts and hedges cannot silently flip
-- **Local Raschka detectors** as the free/dev verifier
-- **Remote adapters** for Pangram 4 and GPTZero v2 (verify / `adh score`)
-- **Optional:** statistical ensemble, structural prepass, hard mode, post-loop verify
+- **Detector-guided loop** — rewrite flagged sentences only, not the whole document
+- **Register/style shift** — rhythm and transitions, not synonym maps
+- **Preserve-lock** — numbers, URLs, emails, DOIs, quotes, code, acronyms, names
+- **Meaning gate stack** — semantic similarity + mechanical vetoes (numerals, hedges, deletion)
+- **Local Raschka detectors** — free/dev inner-loop verifiers (`qwen3-variable`, etc.)
+- **Remote adapters** — Pangram / GPTZero for post-loop verify and `adh score` only
 
-Local scores are proxies. They correlate with tools such as Pangram; they are not Pangram.
+---
 
-## Research basis
+## Configuration
 
-This product applies published techniques. It is not a paper.
+Project settings live in **`adh.yaml`** (or `ADH_CONFIG`). Profiles bundle sensible defaults:
 
-1. [Adversarial Paraphrasing (2025)](https://arxiv.org/abs/2506.07001) — detector-guided rewrite, training-free
-2. [Raschka, *Building an AI Text Detector From Scratch*](https://magazine.sebastianraschka.com/p/ai-detector-from-scratch) — agent loop with a detector API as feedback
-3. [untell](https://github.com/ssamba1/untell) — closed loop plus citation/number locking
-4. [AuthorMist](https://arxiv.org/abs/2503.08716) / [StealthRL](https://arxiv.org/abs/2602.08934) — detector-as-reward (optional later GRPO stage)
-5. [APT-Eval (2025)](https://aclanthology.org/2025.findings-acl.1303.pdf) — polished human writing is often mis-flagged
-
-## Honest limits
-
-- Do not use this to cheat on academic integrity checks.
-- Do not treat a local score as a Pangram, GPTZero, or Turnitin verdict.
-- Pangram 4 also has a humanizer-detection head. Phrase-swapping tools are often flagged as *humanized AI*. This engine avoids those cheap tricks; it still cannot promise a pass.
-- Detector APIs and model cards have their own terms. Follow them.
-
-## Setup (Python 3.11)
-
-Step-by-step extras, env vars, model fetch, API, and troubleshooting: **[docs/SETUP.md](docs/SETUP.md)**. Start with **[Try in 30 seconds](docs/SETUP.md#try-in-30-seconds)** (`adh try` / `--profile fast`) if you have no keys yet.
+| Profile | Use case |
+|---------|----------|
+| `fast` | Zero-key test mode (fake detector, identity rewriter) |
+| `standard` | Default local production (OpenAI rewriter + local detector) |
+| `quality` | `ensemble-local` detector, higher rounds |
+| `verify-only` | Score/verify path, identity rewriter |
 
 ```bash
-git clone https://github.com/faheemgurkani/adversarial-detector-humanizer.git
-cd adversarial-detector-humanizer
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-cp .env.example .env
+adh init
+adh doctor                    # pre-flight: keys, models, torch
+adh humanize --file draft.txt --json
 ```
 
-Edit `.env` and set `OPENAI_API_KEY` (and optionally `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL`) before `adh humanize`. For verification scoring, add `PANGRAM_API_KEY` and/or `GPTZERO_API_KEY` and use `adh score --detector pangram|gptzero` or `--verify` on humanize (not supported as the humanize inner loop).
+CLI flags and HTTP fields **override** file values for that request only. See [docs/SETUP.md](docs/SETUP.md).
 
-Local neural detectors and MiniLM need the `local` extra:
-
-```bash
-python -m pip install -e ".[local,dev]"
-adh models fetch --model distilbert
-```
-
-Published weights live on the Hugging Face Hub under `rasbt/ai-text-detector-*` and are cached at `~/.cache/adversarial-detector-humanizer/models/` (override with `ADH_MODELS_DIR` or `--models-dir`).
+---
 
 ## CLI
 
 ```bash
 adh --help
-adh try
-adh models list
-adh score --detector fake --text "Furthermore, it is important to note the result."
-adh humanize --profile fast --text "Furthermore, note this." --json
-adh humanize --detector ensemble-local --semantic lexical --allow-lexical-gate \
-  --text "Furthermore, it is important to note the result in 2024."
+adh try                                          # zero-key smoke test
+adh init && adh doctor                           # config + pre-flight
+adh score --detector fake --text "Sample text."
+adh humanize --profile fast --text "..." --json
+adh humanize --async --profile fast --text "..." # job queue (in-process)
+adh serve --host 127.0.0.1 --port 8000
 ```
-
-`adh try` and `--profile fast` need no keys (fake detector + identity rewriter). A production humanize run requires an OpenAI-compatible rewriter (`OPENAI_API_KEY`, optional `OPENAI_BASE_URL`, `ADH_REWRITER_MODEL`). There is no regex humanizer fallback.
 
 Pipe or file input:
 
@@ -95,13 +128,9 @@ adh score --file examples/sample.txt --detector fake
 pbpaste | adh score --detector fake
 ```
 
-JSON `RunReport`:
+Production humanize requires an OpenAI-compatible rewriter (`OPENAI_API_KEY` or local `OPENAI_BASE_URL`). There is **no regex humanizer fallback**.
 
-```bash
-adh humanize --file examples/sample.txt --json --output out.txt
-```
-
-The report includes `score_before`, `score_after`, `semantic_similarity`, per-sentence diffs, locks, verification, and detector breakdown. That object is the seed for `POST /v1/humanize`.
+---
 
 ## HTTP API
 
@@ -115,13 +144,53 @@ adh serve --host 127.0.0.1 --port 8000 --detector fake --semantic lexical
 |--------|------|---------|
 | GET | `/health` | Liveness |
 | GET | `/v1/models` | Published detector artifacts |
-| POST | `/v1/score` | 0–100 AI score |
-| POST | `/v1/humanize` | Closed-loop rewrite + `RunReport` |
+| POST | `/v1/score` | Document score (0–100) |
+| POST | `/v1/humanize` | Sync humanize (compact by default) |
+| POST | `/v1/jobs/humanize` | Async humanize → **202** + `job_id` |
+| GET | `/v1/jobs/{job_id}` | Poll job status (**always 200**) |
 | POST | `/v1/sentences` | Offset-preserving split |
 
-Interactive docs: `http://127.0.0.1:8000/docs`. Full contract: [docs/BACKEND_PRD.md](docs/BACKEND_PRD.md).
+**Sync example** (minimal agent payload):
 
-## Library
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/humanize \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: idem-abc-123' \
+  -d '{"text": "Furthermore, note this.", "profile": "fast"}'
+```
+
+**Async example**:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/jobs/humanize \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "Long document...", "profile": "fast"}'
+# → 202, Location: /v1/jobs/job_…
+
+curl -s http://127.0.0.1:8000/v1/jobs/job_…
+# → {"status":"done","report_id":"report_…","report":{…}}
+```
+
+Every response includes `X-Request-Id: req_…`. Full contract, error codes, idempotency semantics: **[docs/BACKEND_PRD.md](docs/BACKEND_PRD.md)**. Interactive docs: `http://127.0.0.1:8000/docs`.
+
+---
+
+## Library and service layer
+
+Prefer the **service layer** over wiring the engine directly — it matches CLI and HTTP behavior (config merge, adapter loading, `report_id` assignment).
+
+```python
+from adh.service import run_humanize
+from adh.config import resolve_adh_config
+
+report = run_humanize(
+    "Furthermore, note this.",
+    config=resolve_adh_config(profile="fast"),
+)
+print(report.report_id, report.stop_reason, report.output_text)
+```
+
+Lower-level engine access remains available for tests and custom integrations:
 
 ```python
 from adh.engine import EngineConfig, humanize
@@ -135,43 +204,87 @@ report = humanize(
     meaning_gate_stack=build_meaning_gate_stack(prefer="lexical", allow_lexical=True),
     config=EngineConfig(min_semantic_similarity=0.2),
 )
-print(report.to_public_dict())
 ```
 
-Or call the shared service (same path as CLI and HTTP):
+---
 
-```python
-from adh.service import run_humanize
-from adh.config import resolve_adh_config
+## Setup
 
-report = run_humanize(
-    "Furthermore, note this.",
-    config=resolve_adh_config(profile="fast"),
-)
+Python **3.11+**. Step-by-step install, extras, model fetch, troubleshooting: **[docs/SETUP.md](docs/SETUP.md)**.
+
+```bash
+git clone https://github.com/faheemgurkani/adversarial-detector-humanizer.git
+cd adversarial-detector-humanizer
+python3.11 -m venv .venv && source .venv/bin/activate
+python -m pip install -e ".[dev]"
+cp .env.example .env
+adh init && adh doctor
 ```
+
+Local neural detectors: `pip install -e ".[local,dev]"` then `adh models fetch --model qwen3-variable`.
+
+---
 
 ## Tests
 
 ```bash
-source .venv/bin/activate
 python -m pytest
 ```
 
-CI uses `FakeDetector` and a lexical gate. No GPU and no paid APIs are required.
+~200 tests. CI uses `FakeDetector` and lexical gates — no GPU, no paid APIs. Coverage includes config merge, registry, service parity (CLI ≡ API), idempotency, async jobs, and doctor pre-flight.
+
+---
 
 ## Project layout
 
 ```
-src/adh/              engine, CLI, API, detectors, gates, prepass, hard mode
-tests/                unit tests for every module
-docs/ROADMAP.md       transformation plan (single source of truth)
-docs/BACKEND_PRD.md   HTTP contract
-docs/ARCHITECTURE.md  engine design
-docs/SETUP.md         install and first commands
-docs/BENCHMARK.md     smoke benchmarks
-.env.example          rewriter and optional detector env template
-examples/sample.txt
+src/adh/
+  engine.py          closed-loop humanize (pure)
+  service.py         run_humanize / run_score (shared use-case layer)
+  config.py          adh.yaml, profiles, resolve_adh_config()
+  registry.py        entry_points plugin loader
+  factory.py         detector / rewriter / gate construction
+  api.py             FastAPI: sync + async jobs
+  cli.py             Typer commands
+  doctor.py          pre-flight checks
+  jobs/              store, worker, runner (async humanize)
+  idempotency.py     Idempotency-Key cache (24h TTL)
+  ids.py             report_ / job_ / req_ ID generation
+  errors.py          structured error envelope + catalog
+  detectors/         Raschka local, fake, statistical, remote, ensemble
+  gates/             meaning gate stack
+  schemas.py         HTTP request/response models (contract)
+tests/               unit + integration per module
+docs/
+  ROADMAP.md         transformation plan (Steps 0–9)
+  BACKEND_PRD.md     frozen /v1 contract
+  ARCHITECTURE.md    engine + boundaries
+  SETUP.md           install and operations
+examples/adh.yaml    committed config template
 ```
+
+---
+
+## Research basis
+
+This product applies published techniques. It is not a paper.
+
+1. [Adversarial Paraphrasing (2025)](https://arxiv.org/abs/2506.07001) — detector-guided rewrite
+2. [Raschka, *Building an AI Text Detector From Scratch*](https://magazine.sebastianraschka.com/p/ai-detector-from-scratch) — detector-in-the-loop
+3. [untell](https://github.com/ssamba1/untell) — closed loop + citation locking
+4. [AuthorMist](https://arxiv.org/abs/2503.08716) / [StealthRL](https://arxiv.org/abs/2602.08934) — detector-as-reward (future GRPO stage)
+5. [APT-Eval (2025)](https://aclanthology.org/2025.findings-acl.1303.pdf) — polished human writing mis-flagged
+
+---
+
+## Honest limits
+
+- Do not use this to cheat on academic integrity checks.
+- Do not treat local scores as commercial detector verdicts.
+- Pangram/GPTZero have their own terms — follow them.
+- Do not claim 100% detector bypass in marketing or docs.
+
+---
 
 ## License
 

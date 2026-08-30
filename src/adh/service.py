@@ -115,6 +115,47 @@ def adh_config_from_request(
     )
 
 
+def humanize_request_from_config(
+    text: str,
+    config: AdhConfig,
+    *,
+    compact: bool = True,
+    metadata: dict[str, str] | None = None,
+) -> HumanizeRequest:
+    """Build a request object from a resolved ``AdhConfig``."""
+    return HumanizeRequest(
+        text=text,
+        profile=config.profile,
+        detector=config.detector,
+        device=config.device,
+        models_dir=str(config.models_dir) if config.models_dir is not None else None,
+        target_score=config.target_score,
+        verdict_score=config.verdict_score,
+        max_rounds=config.max_rounds,
+        sentence_threshold=config.sentence_threshold,
+        min_semantic_similarity=config.min_semantic_similarity,
+        max_rewrite_ratio=config.max_rewrite_ratio,
+        best_of_n=config.best_of_n,
+        rewriter_model=config.rewriter_model,
+        semantic=config.semantic,
+        allow_lexical_gate=config.allow_lexical_gate,
+        meaning_gate_mode=config.meaning_gate_mode,
+        verify=list(config.verify_detectors),
+        verify_threshold=config.verify_threshold,
+        deploy_detectors=list(config.deploy_detectors),
+        enable_logprob_blend=config.enable_logprob_blend,
+        logprob_blend_weight=config.logprob_blend_weight,
+        hard_mode=config.hard_mode,
+        hard_mode_max_sentences=config.hard_mode_max_sentences,
+        prepass=config.prepass,
+        prepass_lang=config.prepass_lang,
+        prepass_max_paragraphs=config.prepass_max_paragraphs,
+        prepass_backend=config.prepass_backend,
+        compact=compact,
+        metadata=dict(metadata or {}),
+    )
+
+
 def _engine_from_adh(config: AdhConfig) -> EngineConfig:
     return EngineConfig(
         target_score=config.target_score,

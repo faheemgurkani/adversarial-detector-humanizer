@@ -140,6 +140,26 @@ def create_app(
     application.state.device = resolved_device
     application.state.models_dir = resolved_models_dir
     application.state.idempotency_store = idempotency_store or IdempotencyStore()
+    application.state.job_store = job_store or JobStore()
+
+    def _job_context() -> dict[str, Any]:
+        return {
+            "store": application.state.job_store,
+            "file_config": application.state.file_config,
+            "detector": application.state.detector,
+            "rewriter": application.state.rewriter,
+            "semantic_gate": application.state.semantic_gate,
+            "default_detector": application.state.default_detector,
+            "device": application.state.device,
+            "models_dir": application.state.models_dir,
+        }
+
+    application.state.job_worker = job_worker or JobWorker(
+        application.state.job_store,
+        build_humanize_handler(_job_context),
+    )
+    if start_job_worker and job_worker is None:
+        application.state.job_worker.start()
 
     class RequestIdMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):  # type: ignore[no-untyped-def]
@@ -279,6 +299,52 @@ def create_app(
                 report_id=report.report_id,
             )
         return response_data
+
+    @application.post(
+        "/v1/jobs/humanize",
+        status_code=202,
+        response_model=JobCreateResponse,
+        responses={
+            202: {"description": "Job accepted for async humanize."},
+            409: {"model": StructuredErrorResponse},
+            422: {"model": StructuredErrorResponse},
+        },
+    )
+    def create_humanize_job(
+        payload: HumanizeRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> JSONResponse:
+        store: JobStore = application.state.job_store
+        body_hash = IdempotencyStore.hash_body(payload.model_dump(mode="json"))
+        record, _created = store.create(
+            payload,
+            body_hash=body_hash,
+            idempotency_key=idempotency_key,
+        )
+        location = f"/v1/jobs/{record.job_id}"
+        body = JobCreateResponse(
+            job_id=record.job_id,
+            status="pending",
+            metadata=dict(record.metadata),
+        )
+        return JSONResponse(
+            status_code=202,
+            content=body.model_dump(),
+            headers={"Location": location},
+        )
+
+    @application.get(
+        "/v1/jobs/{job_id}",
+        response_model=JobResponse,
+        responses={
+            200: {"description": "Job status (always 200 while polling)."},
+            422: {"model": StructuredErrorResponse},
+        },
+    )
+    def get_job(job_id: str) -> JobResponse:
+        record = application.state.job_store.require(job_id)
+        payload = application.state.job_store.to_response(record)
+        return JobResponse.model_validate(payload)
 
     @application.post("/v1/sentences", response_model=SentenceSplitResponse)
     def sentences_endpoint(payload: SentenceSplitRequest) -> SentenceSplitResponse:
