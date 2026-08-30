@@ -42,7 +42,7 @@ The closed loop in `src/adh/engine.py` is implemented and tested:
 | Service layer (CLI ≡ HTTP) | Done | `service.py` |
 | Benchmark harness | Done | `scripts/benchmark.py`, `docs/BENCHMARK.md` |
 
-**Product shell (Steps 0–6 done):** unified config (`adh.yaml`), plugin registry, service layer, `adh doctor`, Stripe-style HTTP contract (IDs, structured errors, idempotency), async jobs. **Remaining:** Docker, MCP, SDK — see [§9 Build order](#9-build-order).
+**Product shell (Steps 0–6 done):** unified config (`adh.yaml`), plugin registry, service layer, `adh doctor`, Stripe-style HTTP contract (IDs, structured errors, idempotency), async jobs. **Remaining:** MCP, SDK — see [§9 Build order](#9-build-order). <!-- Docker (Step 7) deferred — see commented sections below. -->
 
 Reference clones for research live under `docs/resources/` (gitignored). See [resources/README.md](resources/README.md).
 
@@ -344,7 +344,7 @@ Front-load naming contracts and package boundaries; they are painful to change a
 | **4** | `adh doctor` | Trust + pre-flight before integrations |
 | **5** | Freeze sync `/v1/humanize`; `compact` default; `agent_hint`; `metadata`; idempotency | Stable contract + API review gate |
 | **6** | Async jobs (`job_…` IDs, idempotency, poll 200 + status, structured errors) | Long docs, real deployments |
-| **7** | Docker image + compose | One-command team deploy |
+<!-- | **7** | Docker image + compose | One-command team deploy | — deferred -->
 | **8** | MCP server (`adh mcp serve`) | Cursor / Claude Code workflows |
 | **9** | Python SDK + n8n/LangChain examples | Easiest once 1–6 stable |
 
@@ -394,10 +394,11 @@ Front-load naming contracts and package boundaries; they are painful to change a
 - [x] Idempotency on job create
 - [x] Failed jobs use same structured `error` envelope as sync routes
 
-**Step 7 — Docker**
+<!-- **Step 7 — Docker** (deferred)
 - [ ] `Dockerfile` with `[api,local]` optional GPU variant
 - [ ] Volume for model cache + `.env`
 - [ ] `docker compose up` serves `/health`
+-->
 
 **Step 8 — MCP**
 - [ ] Tools: score, humanize, doctor, verify
@@ -426,7 +427,7 @@ These are **engine enhancements**, not packaging. Lower priority than Steps 1–
 
 | Tier | Who runs it | How users access |
 |------|-------------|------------------|
-| **Open-core (primary)** | User / team | `pip install`, Docker, `adh serve` on own infra |
+| **Open-core (primary)** | User / team | `pip install`, `adh serve` on own infra <!-- optional: Docker (Step 7, deferred) --> |
 | **Optional hosted API (later)** | You | API key + same `/v1` contract |
 | **Agent / workflow** | User's agent | MCP or HTTP to local/ hosted server |
 
@@ -468,9 +469,9 @@ The utility is “product-ready” (open-core) when a new user can:
 2. **`adh humanize --profile fast --detector fake --text "Hello world." --json`** — no keys, ~30 seconds (test mode)
 3. `adh init && adh doctor` → all green before production profile
 4. `adh humanize --profile standard --file draft.txt --json` (with rewriter key)
-5. `docker compose up` → `curl POST /v1/humanize` with `Idempotency-Key` and `compact: true`
-6. Plug an MCP client into `adh mcp serve` and humanize a paragraph
-7. Read [BACKEND_PRD.md](BACKEND_PRD.md) for contract, error codes, and `stop_reason` values
+<!-- 5. `docker compose up` → `curl POST /v1/humanize` with `Idempotency-Key` and `compact: true` — Step 7 Docker, deferred -->
+5. Plug an MCP client into `adh mcp serve` and humanize a paragraph
+6. Read [BACKEND_PRD.md](BACKEND_PRD.md) for contract, error codes, and `stop_reason` values
 
 Without cloning the repo, reading twenty flags, or guessing env vars.
 
@@ -744,7 +745,7 @@ src/adh/
 
 ---
 
-### Step 7 — Docker
+<!-- ### Step 7 — Docker (deferred)
 
 **Goal:** One-command team deploy with same contract as local.
 
@@ -764,7 +765,7 @@ src/adh/
 | `test_compose_health` | `docker compose up -d` → `curl /health` 200 within 60s. |
 | `test_compose_humanize_fast_profile` | POST humanize with profile fast → 200. |
 
----
+-->
 
 ### Step 8 — MCP server
 
@@ -838,13 +839,13 @@ src/adh/
 | `tests/test_api.py` (extend) | 0b, 5 |
 | `tests/test_schemas.py` (extend) | 5 |
 | `tests/test_jobs.py` | 6 |
-| `tests/test_docker.py` | 7 (slow, optional CI job) |
+<!-- | `tests/test_docker.py` | 7 (slow, optional CI job) — Step 7 Docker, deferred -->
 | `tests/test_mcp.py` | 8 |
 | `tests/test_sdk.py` | 9 |
 | `tests/test_contract_parity.py` | ongoing |
 | `tests/test_setup_docs.py` (extend) | docs stay synced |
 
-**CI recommendation:** Run all except `test_docker*` and `@pytest.mark.slow` on every push; nightly job for Docker + model downloads.
+**CI recommendation:** Run all except `@pytest.mark.slow` on every push; optional nightly job for model-download tests. <!-- Docker CI (Step 7) deferred. -->
 
 ---
 
